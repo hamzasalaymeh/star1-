@@ -1,0 +1,433 @@
+<title>GHADA</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:#000008;font-family:Georgia,'Times New Roman',serif;cursor:none;-webkit-font-smoothing:antialiased}
+canvas{position:fixed;top:0;left:0;width:100%;height:100%}
+#flash{position:fixed;inset:0;background:#fff;opacity:0;pointer-events:none;z-index:10;transition:opacity .15s ease}
+#flash.on{opacity:1}
+#flash.slow{transition:opacity 3s ease}
+#vignette{position:fixed;inset:0;background:radial-gradient(ellipse at center,transparent 35%,rgba(0,0,8,.85) 100%);pointer-events:none;z-index:20}
+#intro{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;z-index:15;pointer-events:none}
+#star{width:6px;height:6px;border-radius:50%;background:radial-gradient(circle,#ffeedd,#ffcc88 60%,transparent 100%);opacity:0;transition:opacity 1.5s ease,transform 1s ease;filter:blur(0px)}
+#star.visible{opacity:1}
+#star.grow{transform:scale(8);filter:blur(1px)}
+#star.big{transform:scale(16);filter:blur(2px)}
+#star.supernova{transform:scale(600);filter:blur(4px);opacity:1;transition:transform .3s ease,opacity 2s ease .5s}
+#star.gone{opacity:0;transform:scale(1)}
+#glow{position:absolute;width:80px;height:80px;border-radius:50%;background:radial-gradient(circle,rgba(255,200,120,.25),transparent 70%);top:50%;left:50%;transform:translate(-50%,-50%);opacity:0;transition:opacity 1s ease}
+#glow.on{opacity:1;animation:pulse 0.78s ease-in-out infinite}
+@keyframes pulse{0%,100%{transform:translate(-50%,-50%) scale(1)}50%{transform:translate(-50%,-50%) scale(1.5)}}
+#text{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:30;text-align:center;max-width:min(600px,85vw);pointer-events:none;line-height:2.2;letter-spacing:3px;font-size:clamp(15px,2.4vw,24px)}
+#text .w{color:rgba(255,240,220,0);transition:color .6s ease;display:inline}
+#text .w.on{color:rgba(255,240,220,.85)}
+#text .br{display:block;height:.5em}
+#hint{position:fixed;top:55%;left:50%;transform:translate(-50%,-50%);z-index:30;color:rgba(255,255,255,0);font-size:11px;letter-spacing:8px;text-transform:uppercase;pointer-events:none;transition:color 2s ease}
+#hint.show{color:rgba(255,255,255,.22)}
+#hint.hide{color:rgba(255,255,255,0);transition:color 1s ease}
+#mute{position:fixed;bottom:24px;right:24px;z-index:40;width:34px;height:34px;border-radius:50%;border:1px solid rgba(255,255,255,.08);background:rgba(0,0,8,.3);color:rgba(255,255,255,.4);font-size:14px;cursor:pointer;display:none;align-items:center;justify-content:center;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);transition:all .3s ease;pointer-events:all}
+#mute:hover{border-color:rgba(255,220,150,.2);color:rgba(255,220,150,.6)}
+#cur{position:fixed;width:18px;height:18px;border-radius:50%;pointer-events:none;z-index:50;background:radial-gradient(circle,rgba(255,210,140,.7),rgba(255,180,100,.15),transparent 70%);transform:translate(-100px,-100px);mix-blend-mode:screen}
+</style>
+
+<div id="flash"></div>
+<div id="intro"><div id="star"><div id="glow"></div></div></div>
+<canvas id="c"></canvas>
+<div id="vignette"></div>
+<div id="text"></div>
+<div id="hint">click to begin</div>
+<button id="mute">&#9834;</button>
+<div id="cur"></div>
+
+<script>
+'use strict';
+const M=/Mobi|Android/i.test(navigator.userAgent);
+const STARS=M?80000:150000,NEBS=400,LSTARS=2800;
+const DPR=Math.min(devicePixelRatio||1,M?1.5:2);
+const $=id=>document.getElementById(id);
+
+/* ─── cursor ─── */
+if(!M){let cx=-99,cy=-99;document.addEventListener('mousemove',e=>{cx=e.clientX;cy=e.clientY});
+(function lp(){$('cur').style.transform=`translate(${cx-9}px,${cy-9}px)`;requestAnimationFrame(lp)})()}
+else{$('cur').style.display='none';document.body.style.cursor='auto'}
+
+/* ─── matrix math ─── */
+function perspective(f,a,n,fa){const t=1/Math.tan(f/2),nf=1/(n-fa);return new Float32Array([t/a,0,0,0,0,t,0,0,0,0,(fa+n)*nf,-1,0,0,2*fa*n*nf,0])}
+function lookAt(e,c,u){
+  let zx=e[0]-c[0],zy=e[1]-c[1],zz=e[2]-c[2],l=1/Math.hypot(zx,zy,zz);zx*=l;zy*=l;zz*=l;
+  let xx=u[1]*zz-u[2]*zy,xy=u[2]*zx-u[0]*zz,xz=u[0]*zy-u[1]*zx;l=Math.hypot(xx,xy,xz);
+  if(l){l=1/l;xx*=l;xy*=l;xz*=l}
+  const yx=zy*xz-zz*xy,yy=zz*xx-zx*xz,yz=zx*xy-zy*xx;
+  return new Float32Array([xx,yx,zx,0,xy,yy,zy,0,xz,yz,zz,0,
+    -(xx*e[0]+xy*e[1]+xz*e[2]),-(yx*e[0]+yy*e[1]+yz*e[2]),-(zx*e[0]+zy*e[1]+zz*e[2]),1])}
+
+/* ─── WebGL helpers ─── */
+const canvas=$('c');
+const gl=canvas.getContext('webgl',{alpha:false,antialias:!M,powerPreference:'high-performance'});
+if(!gl){$('hint').textContent='WebGL not supported';$('hint').classList.add('show')}
+
+function mkShader(t,s){const sh=gl.createShader(t);gl.shaderSource(sh,s);gl.compileShader(sh);
+  if(!gl.getShaderParameter(sh,gl.COMPILE_STATUS)){console.error(gl.getShaderInfoLog(sh));return null}return sh}
+function mkProgram(vs,fs){const p=gl.createProgram();gl.attachShader(p,mkShader(gl.VERTEX_SHADER,vs));
+  gl.attachShader(p,mkShader(gl.FRAGMENT_SHADER,fs));gl.linkProgram(p);return p}
+
+/* ─── shaders ─── */
+const starVS=`
+precision highp float;
+attribute vec3 aP;attribute vec3 aC;attribute float aS;attribute float aPh;
+uniform mat4 uProj,uView;uniform float uT,uDPR,uFade;
+varying vec3 vC;varying float vB;
+void main(){
+  vC=aC;
+  float tw=sin(uT*1.3+aPh*6.283)*.22+.78;
+  vB=tw*uFade;
+  vec4 vp=uView*vec4(aP,1.);float d=length(vp.xyz);
+  gl_Position=uProj*vp;
+  gl_PointSize=clamp(aS*uDPR*(180./max(d,1.))*tw,.3,28.);
+}`;
+const starFS=`
+precision highp float;varying vec3 vC;varying float vB;
+void main(){
+  vec2 p=gl_PointCoord-.5;float d=length(p);
+  if(d>.5)discard;
+  float core=exp(-d*d*55.);float glow=exp(-d*7.)*.3;
+  float a=(core+glow)*vB;
+  gl_FragColor=vec4(vC*a,a);
+}`;
+const letterVS=`
+precision highp float;
+attribute vec3 aS,aL,aC;attribute float aSz,aPh;
+uniform mat4 uProj,uView;uniform float uT,uDPR,uFade,uMorph;
+varying vec3 vC;varying float vB;
+void main(){
+  vec3 pos=mix(aS,aL,uMorph);
+  vC=aC;
+  float tw=sin(uT*1.3+aPh*6.283)*.22+.78;
+  float mg=1.+uMorph*.6;
+  vB=tw*uFade*mg;
+  vec4 vp=uView*vec4(pos,1.);float d=length(vp.xyz);
+  gl_Position=uProj*vp;
+  gl_PointSize=clamp(aSz*uDPR*(180./max(d,1.))*tw*mg,.3,35.);
+}`;
+
+/* ─── star data ─── */
+const palette=[[1,.97,.94],[1,.88,.7],[.93,.95,1],[.63,.78,1],[1,.73,.47],[1,.53,.53],[.8,.6,1],[1,1,1],[1,.84,.4],[.69,.77,.87],[.5,.7,1],[1,.93,.8]];
+const nebCols=[[.35,.12,.55],[.12,.35,.45],[.45,.2,.12],[.25,.08,.4],[.08,.25,.4],[.5,.25,.1],[.2,.1,.35]];
+
+function genStars(){
+  const d=new Float32Array((STARS+NEBS)*8);
+  for(let i=0;i<STARS;i++){
+    const r=15+Math.pow(Math.random(),.55)*5000;
+    const th=Math.random()*Math.PI*2,phi=Math.acos(2*Math.random()-1);
+    const disk=Math.exp(-Math.abs(Math.cos(phi))*2.5);
+    const rd=r*(.2+disk*.8);
+    const j=i*8;
+    d[j]=rd*Math.sin(phi)*Math.cos(th);
+    d[j+1]=rd*Math.sin(phi)*Math.sin(th)*(.12+Math.random()*.2);
+    d[j+2]=rd*Math.cos(phi);
+    const c=palette[Math.floor(Math.random()*palette.length)];
+    const b=.5+Math.random()*.5;
+    d[j+3]=c[0]*b;d[j+4]=c[1]*b;d[j+5]=c[2]*b;
+    d[j+6]=Math.random()<.003?4+Math.random()*6:Math.random()<.04?1.5+Math.random()*2.5:.4+Math.random()*1.2;
+    d[j+7]=Math.random();
+  }
+  for(let i=0;i<NEBS;i++){
+    const r=30+Math.random()*3000;
+    const th=Math.random()*Math.PI*2,phi=Math.acos(2*Math.random()-1);
+    const j=(STARS+i)*8;
+    d[j]=r*Math.sin(phi)*Math.cos(th);d[j+1]=r*Math.sin(phi)*Math.sin(th)*.3;d[j+2]=r*Math.cos(phi);
+    const c=nebCols[Math.floor(Math.random()*nebCols.length)];
+    const b=.02+Math.random()*.03;
+    d[j+3]=c[0]*b;d[j+4]=c[1]*b;d[j+5]=c[2]*b;
+    d[j+6]=20+Math.random()*40;d[j+7]=Math.random();
+  }
+  return d;
+}
+
+function ghadaPts(){
+  const pts=[];const sc=2.2,sp=13,sx=-sp*2.3;
+  const L=(segs,ox)=>{segs.forEach(s=>{for(let i=0;i<=30;i++){const t=i/30;
+    pts.push([(s[0]+(s[2]-s[0])*t)*sc+ox,(s[1]+(s[3]-s[1])*t)*sc-4.5,(Math.random()-.5)*2.5])}});
+    for(let i=0;i<50;i++){const s=segs[Math.floor(Math.random()*segs.length)];const t=Math.random();
+    pts.push([(s[0]+(s[2]-s[0])*t)*sc+ox+(Math.random()-.5)*1.8,(s[1]+(s[3]-s[1])*t)*sc-4.5+(Math.random()-.5)*1.8,(Math.random()-.5)*4])}};
+  L([[2,4,1,4],[1,4,0,3],[0,3,0,1],[0,1,1,0],[1,0,2,0],[2,0,3,1],[3,1,3,2],[3,2,1.5,2]],sx);
+  L([[0,0,0,4],[3,0,3,4],[0,2,3,2]],sx+sp);
+  L([[0,0,1.5,4],[1.5,4,3,0],[.6,1.6,2.4,1.6]],sx+sp*2);
+  L([[0,0,0,4],[0,4,2,4],[2,4,3,3],[3,3,3,1],[3,1,2,0],[2,0,0,0]],sx+sp*3);
+  L([[0,0,1.5,4],[1.5,4,3,0],[.6,1.6,2.4,1.6]],sx+sp*4);
+  return pts;
+}
+
+function genLetters(){
+  const lp=ghadaPts();const N=Math.min(lp.length,LSTARS);
+  const d=new Float32Array(N*11);
+  for(let i=0;i<N;i++){
+    const j=i*11;
+    const r=200+Math.random()*600,th=Math.random()*Math.PI*2,phi=Math.acos(2*Math.random()-1);
+    d[j]=r*Math.sin(phi)*Math.cos(th);d[j+1]=r*Math.sin(phi)*Math.sin(th);d[j+2]=r*Math.cos(phi);
+    const li=i%lp.length;
+    d[j+3]=lp[li][0];d[j+4]=lp[li][1];d[j+5]=lp[li][2];
+    const b=.7+Math.random()*.3;
+    d[j+6]=b;d[j+7]=b*.85;d[j+8]=b*.5;
+    d[j+9]=.8+Math.random()*.8;d[j+10]=Math.random();
+  }
+  return{data:d,count:N};
+}
+
+/* ─── audio ─── */
+class Snd{
+  constructor(){this.x=null;this.g=null;this.mt=false}
+  init(){if(this.x)return;this.x=new(AudioContext||webkitAudioContext)();this.g=this.x.createGain();this.g.gain.value=0;this.g.connect(this.x.destination);this.g.gain.linearRampToValueAtTime(.3,this.x.currentTime+3)}
+  pad(f,ty='sine',gv=.015,dt=0){if(!this.x)return;const o=this.x.createOscillator(),g=this.x.createGain();o.type=ty;o.frequency.value=f;o.detune.value=dt;g.gain.value=0;g.gain.linearRampToValueAtTime(gv,this.x.currentTime+5);o.connect(g);g.connect(this.g);o.start()}
+  beat(v=.1){if(!this.x)return;const n=this.x.currentTime,o=this.x.createOscillator(),g=this.x.createGain();o.type='sine';o.frequency.value=38;g.gain.setValueAtTime(0,n);g.gain.linearRampToValueAtTime(v,n+.04);g.gain.exponentialRampToValueAtTime(.001,n+.5);o.connect(g);g.connect(this.g);o.start(n);o.stop(n+.6)}
+  tone(f,dur=1.5,gv=.04,ty='sine'){if(!this.x)return;const n=this.x.currentTime,o=this.x.createOscillator(),g=this.x.createGain();o.type=ty;o.frequency.value=f;g.gain.setValueAtTime(0,n);g.gain.linearRampToValueAtTime(gv,n+.08);g.gain.exponentialRampToValueAtTime(.001,n+dur);o.connect(g);g.connect(this.g);o.start(n);o.stop(n+dur+.1)}
+  boom(){if(!this.x)return;const n=this.x.currentTime,b=this.x.createBuffer(2,this.x.sampleRate*4,this.x.sampleRate);for(let c=0;c<2;c++){const d=b.getChannelData(c);for(let i=0;i<d.length;i++)d[i]=(Math.random()*2-1)*Math.exp(-i/(this.x.sampleRate*1.8))}const s=this.x.createBufferSource();s.buffer=b;const g=this.x.createGain(),lp=this.x.createBiquadFilter();lp.type='lowpass';lp.frequency.setValueAtTime(60,n);lp.frequency.linearRampToValueAtTime(2500,n+.3);lp.frequency.linearRampToValueAtTime(50,n+3);g.gain.setValueAtTime(0,n);g.gain.linearRampToValueAtTime(.22,n+.15);g.gain.exponentialRampToValueAtTime(.001,n+4);s.connect(lp);lp.connect(g);g.connect(this.g);s.start(n);this.tone(28,4,.15);this.tone(55,3,.07)}
+  drone(){this.pad(55,'sine',.015);this.pad(55.2,'sine',.01,5);this.pad(82.4,'sine',.006);this.pad(110,'triangle',.003,-3);this.pad(165,'sine',.0015);this.pad(220,'sine',.001,7)}
+  chime(notes){notes.forEach((f,i)=>setTimeout(()=>this.tone(f,2.5,.03),i*180))}
+  finale(){[261.6,329.6,392,523.3,659.3,784,1047,1319,1047,784,659.3,523.3,392,329.6,261.6].forEach((f,i)=>setTimeout(()=>this.tone(f,3.5,.03),i*450));this.tone(130.8,9,.02);this.tone(196,9,.012);this.tone(65.4,9,.025)}
+  mute(){this.mt=!this.mt;this.g.gain.linearRampToValueAtTime(this.mt?0:.3,this.x.currentTime+.3)}
+}
+const snd=new Snd();
+
+/* ─── WebGL setup ─── */
+let W=innerWidth,H=innerHeight;
+canvas.width=W*DPR;canvas.height=H*DPR;
+let projMat=perspective(1.047,W/H,.1,20000);
+
+const starProg=mkProgram(starVS,starFS);
+const sU={proj:gl.getUniformLocation(starProg,'uProj'),view:gl.getUniformLocation(starProg,'uView'),t:gl.getUniformLocation(starProg,'uT'),dpr:gl.getUniformLocation(starProg,'uDPR'),fade:gl.getUniformLocation(starProg,'uFade')};
+const sA={p:gl.getAttribLocation(starProg,'aP'),c:gl.getAttribLocation(starProg,'aC'),s:gl.getAttribLocation(starProg,'aS'),ph:gl.getAttribLocation(starProg,'aPh')};
+
+const letProg=mkProgram(letterVS,starFS);
+const lU={proj:gl.getUniformLocation(letProg,'uProj'),view:gl.getUniformLocation(letProg,'uView'),t:gl.getUniformLocation(letProg,'uT'),dpr:gl.getUniformLocation(letProg,'uDPR'),fade:gl.getUniformLocation(letProg,'uFade'),morph:gl.getUniformLocation(letProg,'uMorph')};
+const lA={s:gl.getAttribLocation(letProg,'aS'),l:gl.getAttribLocation(letProg,'aL'),c:gl.getAttribLocation(letProg,'aC'),sz:gl.getAttribLocation(letProg,'aSz'),ph:gl.getAttribLocation(letProg,'aPh')};
+
+const starData=genStars();
+const starBuf=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,starBuf);gl.bufferData(gl.ARRAY_BUFFER,starData,gl.STATIC_DRAW);
+const starCount=STARS+NEBS;
+
+const letInfo=genLetters();
+const letBuf=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,letBuf);gl.bufferData(gl.ARRAY_BUFFER,letInfo.data,gl.STATIC_DRAW);
+
+gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE);
+
+window.addEventListener('resize',()=>{W=innerWidth;H=innerHeight;canvas.width=W*DPR;canvas.height=H*DPR;gl.viewport(0,0,canvas.width,canvas.height);projMat=perspective(1.047,W/H,.1,20000)});
+
+/* ─── state ─── */
+let started=false,phase='wait',starFade=0,morph=0;
+let camPos=[0,0,5],camTarget=[0,0,5],camLook=[0,0,0],camLookTarget=[0,0,0];
+let mx=0,my=0,mxS=0,myS=0;
+
+const onM=(x,y)=>{mx=(x/W)*2-1;my=-(y/H)*2+1};
+window.addEventListener('mousemove',e=>onM(e.clientX,e.clientY));
+window.addEventListener('touchmove',e=>{if(e.touches[0])onM(e.touches[0].clientX,e.touches[0].clientY)},{passive:true});
+
+const wait=ms=>new Promise(r=>setTimeout(r,ms));
+function ease3(t){return t<.5?4*t*t*t:1-Math.pow(-2*t+2,3)/2}
+
+/* ─── text ─── */
+async function showText(txt,holdMs=4000){
+  const el=$('text');el.innerHTML='';
+  const parts=txt.split('\n');
+  const spans=[];
+  parts.forEach((line,li)=>{
+    if(li>0){const br=document.createElement('div');br.className='br';el.appendChild(br)}
+    line.split(' ').forEach(w=>{
+      const s=document.createElement('span');s.className='w';s.textContent=w+' ';el.appendChild(s);spans.push(s);
+    });
+  });
+  for(const s of spans){s.classList.add('on');await wait(130)}
+  await wait(holdMs);
+  spans.forEach(s=>s.classList.remove('on'));
+  await wait(2000);
+  el.innerHTML='';
+}
+
+/* ─── camera ─── */
+function moveCam(pos,look,dur=6000){
+  const sp=[...camPos],sl=[...camLook],t0=performance.now();
+  return new Promise(r=>{(function go(){
+    const t=Math.min((performance.now()-t0)/dur,1),e=ease3(t);
+    camTarget=[sp[0]+(pos[0]-sp[0])*e,sp[1]+(pos[1]-sp[1])*e,sp[2]+(pos[2]-sp[2])*e];
+    camLookTarget=[sl[0]+(look[0]-sl[0])*e,sl[1]+(look[1]-sl[1])*e,sl[2]+(look[2]-sl[2])*e];
+    if(t<1)requestAnimationFrame(go);else r()})()});
+}
+
+/* ─── experience ─── */
+async function start(){
+  if(started)return;started=true;snd.init();
+  $('hint').classList.replace('show','hide');$('mute').style.display='flex';
+  phase='intro';
+
+  await wait(1500);
+  $('star').classList.add('visible');$('glow').classList.add('on');
+
+  let bc=0;const hb=setInterval(()=>{snd.beat(.08+bc*.006);bc++},780);
+  await wait(2500);
+  $('star').classList.add('grow');snd.tone(220,2,.02);
+  await wait(2000);
+  $('star').classList.replace('grow','big');
+  await wait(1500);
+  clearInterval(hb);
+  $('star').className='gone';snd.tone(50,.8,.06);
+  await wait(500);
+
+  snd.boom();$('flash').classList.add('on');
+  await wait(150);
+  $('flash').classList.add('slow');$('flash').classList.remove('on');
+  $('intro').style.display='none';
+
+  let fi=0;const fadeIn=setInterval(()=>{fi=Math.min(fi+.008,1);starFade=fi;if(fi>=1)clearInterval(fadeIn)},16);
+  snd.drone();
+  await wait(4000);
+
+  phase='journey';
+  const Q=[
+    "When the universe was born...\nit didn't know it was creating beauty.",
+    "There are places even light\nneeds time to reach.",
+    "Every star carries a story.",
+    "Silence is where\nthe universe speaks.",
+    "Some lights shine long after\nthey disappear.",
+    "Not every miracle makes a sound.",
+    "There are billions of stars...\nyet sometimes only one\ncaptures your eyes.",
+    "The most beautiful things\nnever ask to be noticed.",
+    "Some souls feel strangely familiar...\neven across galaxies.",
+    "Some names deserve to be written\nacross the sky."
+  ];
+
+  await wait(2000);
+  await showText(Q[0],5500);
+  snd.chime([392,494,587]);
+
+  moveCam([60,15,-120],[80,20,-200],10000);
+  await wait(3000);await showText(Q[1],5000);
+
+  moveCam([40,8,-80],[60,10,-140],8000);
+  await wait(2000);await showText(Q[2],4000);
+  snd.chime([523,659,784]);
+
+  moveCam([-30,20,-200],[-50,25,-400],10000);
+  await wait(3000);await showText(Q[3],5000);
+
+  moveCam([20,-10,-150],[0,0,-300],9000);
+  await wait(2000);await showText(Q[4],5000);
+  snd.chime([659,784,988]);
+
+  moveCam([-40,30,-250],[-80,40,-500],9000);
+  await wait(3000);await showText(Q[5],4500);
+
+  moveCam([10,5,-100],[0,0,-200],8000);
+  await wait(2000);await showText(Q[6],6000);
+
+  moveCam([30,-5,-180],[50,-10,-350],9000);
+  await wait(2000);await showText(Q[7],5000);
+  snd.chime([784,988,1175]);
+
+  moveCam([-20,15,-130],[0,10,-250],8000);
+  await wait(2000);await showText(Q[8],5500);
+
+  moveCam([0,5,-80],[0,2,-150],7000);
+  await wait(2000);await showText(Q[9],5000);
+  snd.chime([784,988,1175,1319]);
+
+  // FINALE
+  phase='finale';snd.finale();
+  await moveCam([0,2,-55],[0,0,-100],5000);
+
+  const dur=10000,t0=performance.now();
+  await new Promise(r=>{(function go(){
+    const t=Math.min((performance.now()-t0)/dur,1);morph=ease3(t);
+    if(t<1)requestAnimationFrame(go);else{morph=1;r()}})()});
+
+  await wait(6000);
+
+  // Fade out universe
+  phase='ending';
+  const fo=setInterval(()=>{starFade=Math.max(starFade-.004,0);if(starFade<=0)clearInterval(fo)},16);
+  await wait(5000);
+
+  await showText("Even the universe needed billions of years...\n\nto create a star like you.",7000);
+  await wait(1500);
+  await showText("G  H  A  D  A",5000);
+  snd.chime([784,988,1175,1319,1568]);
+  await wait(2000);
+  await showText("For the brightest star...",5000);
+
+  await wait(3000);
+
+  // Show restart star
+  starFade=.08;morph=0;
+  const handler=()=>{
+    window.removeEventListener('click',handler);
+    window.removeEventListener('touchstart',handler);
+    restart();
+  };
+  window.addEventListener('click',handler);
+  window.addEventListener('touchstart',handler);
+}
+
+function restart(){
+  camPos=[0,0,5];camTarget=[0,0,5];camLook=[0,0,0];camLookTarget=[0,0,0];
+  starFade=0;morph=0;started=false;phase='wait';
+  $('intro').style.display='flex';$('star').className='';$('glow').className='';
+  $('hint').className='show';$('flash').className='';
+  start();
+}
+
+/* ─── events ─── */
+const go=()=>{if(!started)start()};
+window.addEventListener('click',go);window.addEventListener('touchstart',go,{passive:true});
+$('mute').addEventListener('click',e=>{e.stopPropagation();snd.mute();e.currentTarget.innerHTML=snd.mt?'&#9839;':'&#9834;'});
+setTimeout(()=>$('hint').classList.add('show'),2500);
+
+/* ─── render loop ─── */
+let lastT=0;
+function render(now){
+  requestAnimationFrame(render);
+  now*=.001;const dt=Math.min(now-lastT,.1);lastT=now;
+
+  mxS+=(mx-mxS)*.04;myS+=(my-myS)*.04;
+  camPos[0]+=(camTarget[0]-camPos[0])*.02;
+  camPos[1]+=(camTarget[1]-camPos[1])*.02;
+  camPos[2]+=(camTarget[2]-camPos[2])*.02;
+  camLook[0]+=(camLookTarget[0]-camLook[0])*.02;
+  camLook[1]+=(camLookTarget[1]-camLook[1])*.02;
+  camLook[2]+=(camLookTarget[2]-camLook[2])*.02;
+
+  const breath=.96+Math.sin(now*.3)*.04;
+  const lx=camLook[0]+mxS*4,ly=camLook[1]+myS*2;
+  const viewMat=lookAt(camPos,[lx,ly,camLook[2]],[0,1,0]);
+
+  gl.viewport(0,0,canvas.width,canvas.height);
+  gl.clearColor(0,0,.03,1);gl.clear(gl.COLOR_BUFFER_BIT);
+
+  if(starFade>0){
+    // Background stars
+    gl.useProgram(starProg);
+    gl.uniformMatrix4fv(sU.proj,false,projMat);
+    gl.uniformMatrix4fv(sU.view,false,viewMat);
+    gl.uniform1f(sU.t,now);gl.uniform1f(sU.dpr,DPR);gl.uniform1f(sU.fade,starFade*breath);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER,starBuf);
+    gl.enableVertexAttribArray(sA.p);gl.vertexAttribPointer(sA.p,3,gl.FLOAT,false,32,0);
+    gl.enableVertexAttribArray(sA.c);gl.vertexAttribPointer(sA.c,3,gl.FLOAT,false,32,12);
+    gl.enableVertexAttribArray(sA.s);gl.vertexAttribPointer(sA.s,1,gl.FLOAT,false,32,24);
+    gl.enableVertexAttribArray(sA.ph);gl.vertexAttribPointer(sA.ph,1,gl.FLOAT,false,32,28);
+    gl.drawArrays(gl.POINTS,0,starCount);
+
+    // Letter stars
+    gl.useProgram(letProg);
+    gl.uniformMatrix4fv(lU.proj,false,projMat);
+    gl.uniformMatrix4fv(lU.view,false,viewMat);
+    gl.uniform1f(lU.t,now);gl.uniform1f(lU.dpr,DPR);gl.uniform1f(lU.fade,starFade*breath);gl.uniform1f(lU.morph,morph);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER,letBuf);
+    gl.enableVertexAttribArray(lA.s);gl.vertexAttribPointer(lA.s,3,gl.FLOAT,false,44,0);
+    gl.enableVertexAttribArray(lA.l);gl.vertexAttribPointer(lA.l,3,gl.FLOAT,false,44,12);
+    gl.enableVertexAttribArray(lA.c);gl.vertexAttribPointer(lA.c,3,gl.FLOAT,false,44,24);
+    gl.enableVertexAttribArray(lA.sz);gl.vertexAttribPointer(lA.sz,1,gl.FLOAT,false,44,36);
+    gl.enableVertexAttribArray(lA.ph);gl.vertexAttribPointer(lA.ph,1,gl.FLOAT,false,44,40);
+    gl.drawArrays(gl.POINTS,0,letInfo.count);
+  }
+}
+requestAnimationFrame(render);
+</script>

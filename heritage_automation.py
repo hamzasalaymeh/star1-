@@ -24,6 +24,9 @@ from selenium.common.exceptions import TimeoutException, NoSuchElementException,
 # ==================== إعدادات ====================
 BASE_URL = "https://heritage2.itqan-consultant.com/Web/"
 LOGIN_URL = "https://heritage2.itqan-consultant.com/Web/App/Home/Login"
+DATAVIEW_URL = "https://heritage2.itqan-consultant.com/Web/App/Pools/DataView"
+GRIDVIEW_ID = "ctl112_GridView1"
+RESULTS_PER_PAGE = 25
 USERNAME = os.environ.get("HERITAGE_USERNAME")
 PASSWORD = os.environ.get("HERITAGE_PASSWORD")
 TARGET_REGION = "المنطقة الجنوبية"
@@ -298,21 +301,37 @@ class HeritageDriver:
             return False
 
     def navigate_to_guide_list(self) -> bool:
-        """الانتقال إلى دليل المواقع"""
+        """الانتقال إلى دليل المواقع (رابط مباشر مؤكد)"""
         try:
             logger.info("📍 جاري الانتقال إلى دليل المواقع...")
+            self.driver.get(DATAVIEW_URL)
 
-            # البحث عن الرابط (دليل المواقع)
-            guide_link = self.wait.until(
-                EC.element_to_be_clickable((By.XPATH, "//a[contains(text(), 'دليل المواقع')]"))
-            )
-            guide_link.click()
-            time.sleep(2)
+            self.wait.until(EC.presence_of_element_located((By.ID, GRIDVIEW_ID)))
 
             logger.info("✓ تم الانتقال إلى دليل المواقع")
             return True
         except Exception as e:
             logger.error(f"✗ خطأ في الانتقال إلى دليل المواقع: {e}")
+            return False
+
+    def goto_gridview_page(self, page_number: int) -> bool:
+        """الانتقال مباشرة إلى رقم صفحة معين داخل الجدول عبر __doPostBack
+        (يعمل حتى لو رقم الصفحة غير ظاهر في شريط الترقيم المرئي)"""
+        try:
+            # نحتفظ بمرجع للجدول القديم للتأكد من إعادة تحميله (postback) قبل المتابعة
+            old_table = self.driver.find_element(By.ID, GRIDVIEW_ID)
+
+            self.driver.execute_script(
+                f"__doPostBack('ctl112$GridView1','Page${page_number}')"
+            )
+
+            # ننتظر أن يصبح الجدول القديم "stale" (تم استبداله فعلياً بعد الـ postback)
+            self.wait.until(EC.staleness_of(old_table))
+            self.wait.until(EC.presence_of_element_located((By.ID, GRIDVIEW_ID)))
+            time.sleep(0.5)
+            return True
+        except Exception as e:
+            logger.warning(f"⚠️ خطأ في الانتقال إلى صفحة {page_number}: {e}")
             return False
 
     def apply_filters(self) -> bool:
@@ -357,32 +376,49 @@ class HeritageDriver:
             logger.error(f"✗ خطأ في تطبيق الفلاتر: {e}")
             return False
 
+    def get_total_results_count(self) -> int:
+        """قراءة عدد النتائج الإجمالي من نص مثل: 'نتيجة البحث: 5256 موقع'"""
+        try:
+            import re
+            body_text = self.driver.find_element(By.XPATH, "//*[contains(text(), 'نتيجة البحث')]").text
+            match = re.search(r'(\d+)', body_text.replace(',', ''))
+            return int(match.group(1)) if match else 0
+        except Exception as e:
+            logger.warning(f"⚠️ تعذر قراءة إجمالي النتائج: {e}")
+            return 0
+
     def extract_all_site_links(self) -> List[Tuple[str, str, str]]:
         """استخراج جميع روابط المواقع (مع pagination)"""
         sites = []
         try:
             logger.info("📥 جاري استخراج روابط المواقع...")
 
-            # الحصول على عدد الصفحات
-            pagination_info = self.driver.find_element(By.CSS_SELECTOR, ".pagination-info")
-            pagination_text = pagination_info.text
-            logger.info(f"📊 معلومات الترقيم: {pagination_text}")
-
-            # استخراج المواقع من الجدول
-            rows = self.driver.find_elements(By.XPATH, "//table[@class='data-table']//tbody//tr")
+            # ⚠️ TODO غير مؤكد بعد: بنية خلايا الصف الفعلية (ترتيب الأعمدة، ورابط
+            # "استمارة التسجيل" الحقيقي). الكود أدناه أفضل تخمين حالياً بانتظار
+            # تأكيد من HTML صف بيانات حقيقي (وليس صف الترقيم/الرأس).
+            table = self.driver.find_element(By.ID, GRIDVIEW_ID)
+            rows = table.find_elements(By.XPATH, ".//tbody/tr[not(contains(@class, 'Pagger')) and not(contains(@class,'Header'))]")
             logger.info(f"📌 عدد الصفوف في الصفحة الحالية: {len(rows)}")
 
             for row in rows:
                 try:
-                    # الحصول على رقم الموقع (ID)
-                    site_id = row.find_element(By.XPATH, ".//td[1]").text.strip()
+                    cells = row.find_elements(By.XPATH, "./td")
+                    if not cells:
+                        continue
 
-                    # الحصول على اسم الموقع
-                    site_link = row.find_element(By.XPATH, ".//a")
-                    site_name = site_link.text.strip()
+                    # الكود هو أول عمود (أقصى اليمين في RTL = أول td في الـ DOM)
+                    site_id = cells[0].text.strip()
+                    if not site_id.isdigit():
+                        continue
+
+                    # رابط "استمارة التسجيل" لفتح السجل - غالباً ضمن إحدى آخر الخلايا
+                    site_link = row.find_element(
+                        By.XPATH, ".//a[contains(text(), 'استمارة التسجيل')]"
+                    )
+                    site_name = cells[1].text.strip() if len(cells) > 1 else site_id
                     site_url = site_link.get_attribute('href')
 
-                    if site_id and site_name and site_url:
+                    if site_id and site_url:
                         sites.append((site_id, site_name, site_url))
                         logger.debug(f"  └─ {site_id}: {site_name}")
                 except Exception as e:
@@ -468,27 +504,20 @@ class HeritageDriver:
             return False, f"error: {str(e)}"
 
     def save_form(self) -> bool:
-        """حفظ الاستمارة"""
+        """حفظ الاستمارة (زر مؤكد: id=ctl112_btnSave، value='حفظ بيانات الاستمارة')"""
         try:
             logger.info("  ↳ جاري حفظ الاستمارة...")
 
-            # البحث عن زر الحفظ
             save_button = self.wait.until(
-                EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'حفظ')]"))
+                EC.element_to_be_clickable((By.ID, "ctl112_btnSave"))
             )
             save_button.click()
 
-            # انتظر الرسالة (نجاح أو خطأ)
+            # انتظر اكتمال الـ postback بعد الحفظ
             time.sleep(2)
 
-            # التحقق من رسالة النجاح
-            try:
-                success_msg = self.driver.find_element(By.CLASS_NAME, "alert-success")
-                logger.info(f"  ✓ تم الحفظ بنجاح: {success_msg.text}")
-                return True
-            except:
-                logger.info("  ✓ تم إرسال الحفظ")
-                return True
+            logger.info("  ✓ تم إرسال الحفظ")
+            return True
         except Exception as e:
             logger.warning(f"  ✗ خطأ في الحفظ: {e}")
             return False
@@ -570,30 +599,32 @@ class HeritageAutomation:
             self.driver_manager.close()
 
     def _extract_all_paginated_sites(self) -> List[Tuple[str, str, str]]:
-        """استخراج المواقع من جميع الصفحات"""
+        """استخراج المواقع من جميع الصفحات باستخدام __doPostBack المباشر
+        (لا يعتمد على النقر على أزرار الصفحات المرئية، يدعم 200+ صفحة بأمان)"""
         all_sites = []
-        page = 1
 
         try:
-            while True:
-                logger.info(f"📄 جاري استخراج الصفحة {page}...")
+            total_sites = self.driver_manager.get_total_results_count()
+            total_pages = (total_sites + RESULTS_PER_PAGE - 1) // RESULTS_PER_PAGE if total_sites else 1
+            logger.info(f"📊 إجمالي المواقع المعلن: {total_sites} — إجمالي الصفحات المتوقع: {total_pages}")
+
+            page = 1
+            while page <= total_pages:
+                logger.info(f"📄 جاري استخراج الصفحة {page}/{total_pages}...")
 
                 sites_in_page = self.driver_manager.extract_all_site_links()
                 if not sites_in_page:
+                    logger.warning(f"⚠️ لا توجد مواقع بالصفحة {page} — توقف الاستخراج")
                     break
 
                 all_sites.extend(sites_in_page)
 
-                # محاولة الانتقال للصفحة التالية
-                try:
-                    next_button = self.driver_manager.driver.find_element(
-                        By.XPATH, "//a[@class='next-page' or contains(text(), 'التالي')]"
-                    )
-                    next_button.click()
-                    time.sleep(2)
-                    page += 1
-                except:
-                    logger.info(f"✓ انتهت جميع الصفحات (إجمالي: {page} صفحات)")
+                if page >= total_pages:
+                    break
+
+                page += 1
+                if not self.driver_manager.goto_gridview_page(page):
+                    logger.error(f"❌ فشل الانتقال إلى الصفحة {page} — توقف الاستخراج")
                     break
         except Exception as e:
             logger.warning(f"⚠️ خطأ في استخراج الصفحات: {e}")

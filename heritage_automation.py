@@ -271,6 +271,10 @@ class HeritageDriver:
         # إعدادات أخرى
         options.add_argument('--disable-blink-features=AutomationControlled')
         options.add_argument('start-maximized')
+        # 'start-maximized' لا يعمل بوضع headless (لا توجد نافذة حقيقية تتكبر)،
+        # فنجبر حجم نافذة كبير صراحةً - يمنع تراكب عناصر ثابتة الموضع (position:
+        # absolute) في أسفل الصفحة فوق أزرار الصفحة بسبب viewport افتراضي صغير
+        options.add_argument('--window-size=1920,1080')
         options.add_experimental_option("excludeSwitches", ["enable-automation"])
         options.add_experimental_option('useAutomationExtension', False)
 
@@ -282,6 +286,14 @@ class HeritageDriver:
         except Exception as e:
             logger.error(f"✗ خطأ في فتح المتصفح: {e}")
             raise
+
+    def _safe_click(self, element):
+        """كليك آمن: يجرب الكليك العادي، وإن اعترضه عنصر آخر (تراكب عناصر
+        ثابتة الموضع مثلاً) يلجأ لكليك عبر JavaScript الذي لا يتأثر بذلك"""
+        try:
+            element.click()
+        except Exception:
+            self.driver.execute_script("arguments[0].click();", element)
 
     def close(self):
         """إغلاق المتصفح"""
@@ -311,7 +323,7 @@ class HeritageDriver:
 
             # النقر على زر "تسجيل الدخول" (id=ctl12_btnLogin)
             login_button = self.driver.find_element(By.ID, LOGIN_BUTTON_ID)
-            login_button.click()
+            self._safe_click(login_button)
 
             # انتظر تحميل الصفحة بعد تسجيل الدخول (تأكد أننا خرجنا من صفحة /Login)
             self.wait.until(lambda d: "/Login" not in d.current_url)
@@ -380,7 +392,7 @@ class HeritageDriver:
 
             # الضغط على زر "بحث" لتطبيق الفلترة فعلياً على الجدول
             search_button = self.driver.find_element(By.ID, SEARCH_BUTTON_ID)
-            search_button.click()
+            self._safe_click(search_button)
 
             # ننتظر تحديث تسمية عدد النتائج (يثبت أن نتائج الفلترة وصلت)
             self.wait.until(EC.staleness_of(old_count_label))
@@ -483,7 +495,7 @@ class HeritageDriver:
                 return True, "skipped"
 
             # النقر على الـ label (أضمن من input مباشرة، فقد يكون مغطى بصرياً)
-            label.click()
+            self._safe_click(label)
             time.sleep(0.5)
 
             if radio.is_selected():
@@ -505,7 +517,7 @@ class HeritageDriver:
             save_button = self.wait.until(
                 EC.element_to_be_clickable((By.ID, SAVE_BUTTON_ID))
             )
-            save_button.click()
+            self._safe_click(save_button)
 
             # انتظر اكتمال الـ postback بعد الحفظ
             time.sleep(2)

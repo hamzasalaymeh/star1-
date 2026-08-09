@@ -22,6 +22,13 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
 from selenium.common.exceptions import TimeoutException, NoSuchElementException, StaleElementReferenceException
 
+try:
+    from colorama import init as _colorama_init, Fore, Style
+    _colorama_init(autoreset=True)
+    _COLOR_ENABLED = True
+except ImportError:
+    _COLOR_ENABLED = False
+
 # ==================== إعدادات ====================
 BASE_URL = "https://heritage2.itqan-consultant.com/Web/"
 LOGIN_URL = "https://heritage2.itqan-consultant.com/Web/App/Home/Login"
@@ -76,15 +83,46 @@ LOGIN_WAIT_SECONDS = 60   # المنصة أحياناً تتعلق/تبطئ أث
 LOGIN_MAX_RETRIES = 3     # عدد محاولات إعادة تسجيل الدخول قبل الفشل النهائي
 
 # ==================== إعداد Logging ====================
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(LOG_FILE, encoding='utf-8'),
-        logging.StreamHandler()
-    ]
-)
+class _GreenConsoleFormatter(logging.Formatter):
+    """يلوّن سطور الطرفية بالأخضر (ERROR/WARNING تبقى بلونها المميز)، بدون
+    التأثير على ملف الـ log (يبقى نص عادي هناك)"""
+
+    def format(self, record):
+        message = super().format(record)
+        if not _COLOR_ENABLED:
+            return message
+        if record.levelno >= logging.ERROR:
+            return f"{Fore.RED}{message}{Style.RESET_ALL}"
+        if record.levelno >= logging.WARNING:
+            return f"{Fore.YELLOW}{message}{Style.RESET_ALL}"
+        return f"{Fore.GREEN}{message}{Style.RESET_ALL}"
+
+
+_console_handler = logging.StreamHandler()
+_console_handler.setFormatter(_GreenConsoleFormatter('%(asctime)s - %(levelname)s - %(message)s'))
+
+_file_handler = logging.FileHandler(LOG_FILE, encoding='utf-8')
+_file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+
+logging.basicConfig(level=logging.INFO, handlers=[_file_handler, _console_handler])
 logger = logging.getLogger(__name__)
+
+
+def print_banner():
+    """بانر ترحيبي بأخضر الطرفية الكلاسيكي وقت بدء التشغيل"""
+    banner = r"""
+   _   _ _____ ____  ___ _____  _    ____ _____
+  | | | | ____|  _ \|_ _|_   _|/ \  / ___| ____|
+  | |_| |  _| | |_) || |  | | / _ \| |  _|  _|
+  |  _  | |___|  _ < | |  | |/ ___ \ |_| | |___
+  |_| |_|_____|_| \_\___| |_/_/   \_\____|_____|
+
+        أتمتة تحديث مواقع التراث العمراني
+"""
+    if _COLOR_ENABLED:
+        print(f"{Fore.GREEN}{Style.BRIGHT}{banner}{Style.RESET_ALL}")
+    else:
+        print(banner)
 
 # ==================== Database Functions ====================
 class HeritageDB:
@@ -863,6 +901,8 @@ class HeritageAutomation:
 # ==================== Main ====================
 if __name__ == "__main__":
     import argparse
+
+    print_banner()
 
     parser = argparse.ArgumentParser(description="أتمتة تحديث مواقع منصة التراث العمراني")
     parser.add_argument(

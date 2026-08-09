@@ -23,6 +23,7 @@ from selenium.common.exceptions import TimeoutException, NoSuchElementException,
 
 # ==================== إعدادات ====================
 BASE_URL = "https://heritage2.itqan-consultant.com/Web/"
+LOGIN_URL = "https://heritage2.itqan-consultant.com/Web/App/Home/Login"
 USERNAME = os.environ.get("HERITAGE_USERNAME")
 PASSWORD = os.environ.get("HERITAGE_PASSWORD")
 TARGET_REGION = "المنطقة الجنوبية"
@@ -261,32 +262,36 @@ class HeritageDriver:
         """تسجيل الدخول"""
         try:
             logger.info("🔐 جاري تسجيل الدخول...")
-            self.driver.get(BASE_URL)
+            self.driver.get(LOGIN_URL)
 
-            # إدخال اسم المستخدم
-            username_field = self.wait.until(EC.presence_of_element_located((By.ID, "Username")))
+            # إدخال اسم المستخدم (name="ctl112$ct103")
+            username_field = self.wait.until(
+                EC.presence_of_element_located((By.NAME, "ctl112$ct103"))
+            )
             username_field.clear()
             username_field.send_keys(USERNAME)
             time.sleep(0.5)
 
-            # إدخال كلمة المرور
-            password_field = self.driver.find_element(By.ID, "Password")
+            # إدخال كلمة المرور (name="ctl112$ct107")
+            password_field = self.driver.find_element(By.NAME, "ctl112$ct107")
             password_field.clear()
             password_field.send_keys(PASSWORD)
             time.sleep(0.5)
 
-            # النقر على زر تسجيل الدخول
-            login_button = self.driver.find_element(By.CSS_SELECTOR, "button[type='submit']")
+            # النقر على زر "تسجيل الدخول"
+            login_button = self.driver.find_element(
+                By.XPATH, "//*[self::button or self::input][contains(., 'تسجيل الدخول') or @value='تسجيل الدخول']"
+            )
             login_button.click()
 
-            # انتظر تحميل الصفحة بعد تسجيل الدخول
-            time.sleep(3)
-            self.wait.until(EC.presence_of_element_located((By.CLASS_NAME, "sidebar")))
+            # انتظر تحميل الصفحة بعد تسجيل الدخول (تأكد أننا خرجنا من صفحة /Login)
+            self.wait.until(lambda d: "/Login" not in d.current_url)
+            time.sleep(2)
 
-            logger.info("✓ تم تسجيل الدخول بنجاح")
+            logger.info(f"✓ تم تسجيل الدخول بنجاح - الرابط الحالي: {self.driver.current_url}")
             return True
         except TimeoutException:
-            logger.error("✗ انتهت مهلة الانتظار - فشل تسجيل الدخول")
+            logger.error("✗ انتهت مهلة الانتظار - فشل تسجيل الدخول (تحقق من صحة اليوزر/الباسورد)")
             return False
         except Exception as e:
             logger.error(f"✗ خطأ في تسجيل الدخول: {e}")

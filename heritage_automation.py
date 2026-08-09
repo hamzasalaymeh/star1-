@@ -30,12 +30,12 @@ DATAVIEW_URL = "https://heritage2.itqan-consultant.com/Web/App/Pools/DataView"
 # HTML خام حقيقي (form action="./7"، وتاب "بيانات المعماري" برابط href="7")
 ARCHITECT_DATA_URL_TEMPLATE = "https://heritage2.itqan-consultant.com/Web/App/Pools/DataEdit/{site_id}/7"
 
-# ⚠️ ملاحظة: بادئة أرقام عناصر ASP.NET (ctlXX) قد تختلف من صفحة لأخرى في هذا
-# النظام. صفحتا دليل المواقع (DataView) وبيانات المعماري (DataEdit/{id}/7)
-# مؤكدتان من HTML خام أنهما تستخدمان "ctl12". أما صفحة تسجيل الدخول فقيمة
-# "ctl112" مأخوذة من قراءة صورة (سكرين شوت) لا HTML خام، فاحتمال خطأ قراءة
-# رقمي (12 مقابل 112) وارد ولم يُتحقق منه بنفس درجة اليقين - إذا فشل تسجيل
-# الدخول أول تشغيل، هذا أول مكان يجب التحقق منه.
+# ملاحظة: جميع صفحات هذا النظام (تسجيل الدخول، دليل المواقع، بيانات المعماري)
+# مؤكدة من HTML خام أنها تستخدم بادئة عناصر ASP.NET "ctl12" (بنفس القيمة عبر
+# الصفحات الثلاث، على الأرجح بسبب Master Page مشتركة بنفس عدد العناصر السابقة).
+LOGIN_USERNAME_FIELD_NAME = "ctl12$ctl03"       # مؤكد من HTML صفحة /Home/Login
+LOGIN_PASSWORD_FIELD_NAME = "ctl12$ctl07"       # مؤكد من HTML صفحة /Home/Login
+LOGIN_BUTTON_ID = "ctl12_btnLogin"              # مؤكد من HTML صفحة /Home/Login
 GRIDVIEW_ID = "ctl12_GridView1"                 # مؤكد من HTML صفحة DataView
 GRIDVIEW_POSTBACK_TARGET = "ctl12$GridView1"    # مستخدم مع __doPostBack للترقيم
 RESULTS_COUNT_LABEL_ID = "ctl12_lblCount"       # نص: "نتيجة البحث: N موقع"
@@ -285,34 +285,27 @@ class HeritageDriver:
             logger.info("✓ تم إغلاق المتصفح")
 
     def login(self) -> bool:
-        """تسجيل الدخول
-
-        ⚠️ selectors هذه مأخوذة من قراءة صورة (سكرين شوت) للصفحة، وليس من HTML
-        خام كما هو الحال لبقية الصفحات في هذا الملف. رقم "ctl112" احتمال يكون
-        قراءة غير دقيقة لـ "ctl12" (نفس البادئة المؤكدة بكل الصفحات الأخرى).
-        إذا فشل تسجيل الدخول عند أول تشغيل فعلي، أول شي نتحقق منه هنا."""
+        """تسجيل الدخول (selectors مؤكدة 100% من HTML خام لصفحة /Home/Login)"""
         try:
             logger.info("🔐 جاري تسجيل الدخول...")
             self.driver.get(LOGIN_URL)
 
-            # إدخال اسم المستخدم (name="ctl112$ct103")
+            # إدخال اسم المستخدم (name="ctl12$ctl03")
             username_field = self.wait.until(
-                EC.presence_of_element_located((By.NAME, "ctl112$ct103"))
+                EC.presence_of_element_located((By.NAME, LOGIN_USERNAME_FIELD_NAME))
             )
             username_field.clear()
             username_field.send_keys(USERNAME)
             time.sleep(0.5)
 
-            # إدخال كلمة المرور (name="ctl112$ct107")
-            password_field = self.driver.find_element(By.NAME, "ctl112$ct107")
+            # إدخال كلمة المرور (name="ctl12$ctl07")
+            password_field = self.driver.find_element(By.NAME, LOGIN_PASSWORD_FIELD_NAME)
             password_field.clear()
             password_field.send_keys(PASSWORD)
             time.sleep(0.5)
 
-            # النقر على زر "تسجيل الدخول"
-            login_button = self.driver.find_element(
-                By.XPATH, "//*[self::button or self::input][contains(., 'تسجيل الدخول') or @value='تسجيل الدخول']"
-            )
+            # النقر على زر "تسجيل الدخول" (id=ctl12_btnLogin)
+            login_button = self.driver.find_element(By.ID, LOGIN_BUTTON_ID)
             login_button.click()
 
             # انتظر تحميل الصفحة بعد تسجيل الدخول (تأكد أننا خرجنا من صفحة /Login)

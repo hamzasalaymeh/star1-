@@ -263,6 +263,11 @@ class HeritageDriver:
         profile_path.mkdir(parents=True, exist_ok=True)
         options.add_argument(f'user-data-dir={profile_path}')
 
+        # مسار متصفح مخصص (اختياري) - فقط عند الحاجة لتجاوز Chrome الافتراضي بالنظام
+        chrome_binary = os.environ.get("CHROME_BINARY_PATH")
+        if chrome_binary:
+            options.binary_location = chrome_binary
+
         # إعدادات أخرى
         options.add_argument('--disable-blink-features=AutomationControlled')
         options.add_argument('start-maximized')
@@ -522,11 +527,14 @@ class HeritageAutomation:
         self.total_failed = 0
         self.total_skipped = 0
 
-    def run(self, resume_from: Optional[str] = None):
-        """تشغيل الأتمتة"""
+    def run(self, resume_from: Optional[str] = None, limit: Optional[int] = None):
+        """تشغيل الأتمتة. limit: إن حُدد، يعالج هذا العدد فقط من المواقع
+        (مفيد لتجربة سريعة قبل التشغيل الكامل على كل المواقع)"""
         start_time = datetime.now()
         logger.info("=" * 50)
         logger.info("🚀 بدء أتمتة منصة التراث العمراني")
+        if limit:
+            logger.info(f"🧪 وضع تجربة: سيُعالَج {limit} موقع فقط")
         logger.info(f"⏰ وقت البداية: {start_time}")
         logger.info("=" * 50)
 
@@ -553,7 +561,7 @@ class HeritageAutomation:
             time.sleep(2)
 
             # استخراج المواقع (من جميع الصفحات - هذا جزء مهم يحتاج iteration)
-            all_sites = self._extract_all_paginated_sites()
+            all_sites = self._extract_all_paginated_sites(limit=limit)
 
             if not all_sites:
                 logger.error("❌ لم يتم استخراج أي مواقع")
@@ -566,7 +574,7 @@ class HeritageAutomation:
                 self.db.insert_site(site_id, site_name, site_url)
 
             # معالجة كل موقع
-            self._process_all_sites(resume_from)
+            self._process_all_sites(resume_from, limit)
 
             # إنشاء التقرير
             self._generate_report()
@@ -587,9 +595,11 @@ class HeritageAutomation:
         finally:
             self.driver_manager.close()
 
-    def _extract_all_paginated_sites(self) -> List[Tuple[str, str, str]]:
+    def _extract_all_paginated_sites(self, limit: Optional[int] = None) -> List[Tuple[str, str, str]]:
         """استخراج المواقع من جميع الصفحات باستخدام __doPostBack المباشر
-        (لا يعتمد على النقر على أزرار الصفحات المرئية، يدعم 200+ صفحة بأمان)"""
+        (لا يعتمد على النقر على أزرار الصفحات المرئية، يدعم 200+ صفحة بأمان).
+        إن حُدد limit، يتوقف الاستخراج فور جمع عدد كافٍ من المواقع (توفيراً
+        للوقت أثناء التجربة على عينة صغيرة)."""
         all_sites = []
 
         try:
@@ -608,6 +618,10 @@ class HeritageAutomation:
 
                 all_sites.extend(sites_in_page)
 
+                if limit and len(all_sites) >= limit:
+                    logger.info(f"🧪 تم جمع {len(all_sites)} موقع (>= limit={limit}) — إيقاف الاستخراج المبكر")
+                    break
+
                 if page >= total_pages:
                     break
 
@@ -620,8 +634,8 @@ class HeritageAutomation:
 
         return all_sites
 
-    def _process_all_sites(self, resume_from: Optional[str] = None):
-        """معالجة جميع المواقع"""
+    def _process_all_sites(self, resume_from: Optional[str] = None, limit: Optional[int] = None):
+        """معالجة جميع المواقع (أو أول limit موقع فقط إن حُدد)"""
         pending_sites = self.db.get_pending_sites()
 
         start_index = 0
@@ -632,8 +646,12 @@ class HeritageAutomation:
                     start_index = i
                     break
 
-        for index, (site_id, site_name, site_url) in enumerate(pending_sites[start_index:], start_index + 1):
-            logger.info(f"[{index}/{len(pending_sites)}] 🔄 معالجة الموقع: {site_id} - {site_name}")
+        batch = pending_sites[start_index:]
+        if limit:
+            batch = batch[:limit]
+
+        for index, (site_id, site_name, site_url) in enumerate(batch, 1):
+            logger.info(f"[{index}/{len(batch)}] 🔄 معالجة الموقع: {site_id} - {site_name}")
 
             process_start = time.time()
             steps = []
@@ -739,14 +757,22 @@ class HeritageAutomation:
 
 # ==================== Main ====================
 if __name__ == "__main__":
-    # التحقق من المعاملات
-    import sys
+    import argparse
 
-    resume_site_id = None
-    if len(sys.argv) > 1:
-        resume_site_id = sys.argv[1]
-        logger.info(f"🔄 استئناف من الموقع: {resume_site_id}")
+    parser = argparse.ArgumentParser(description="أتمتة تحديث مواقع منصة التراث العمراني")
+    parser.add_argument(
+        "--resume", metavar="SITE_ID", default=None,
+        help="استئناف يدوي بدءاً من رقم موقع معين ضمن المواقع المعلقة (اختياري - "
+             "غير ضروري عادة، لأن إعادة التشغيل تتخطى المواقع المُنجزة تلقائياً)"
+    )
+    parser.add_argument(
+        "--limit", type=int, default=None,
+        help="معالجة هذا العدد من المواقع فقط (للتجربة على عينة صغيرة قبل التشغيل الكامل)"
+    )
+    args = parser.parse_args()
 
-    # تشغيل الأتمتة
+    if args.resume:
+        logger.info(f"🔄 استئناف من الموقع: {args.resume}")
+
     automation = HeritageAutomation()
-    automation.run(resume_from=resume_site_id)
+    automation.run(resume_from=args.resume, limit=args.limit)

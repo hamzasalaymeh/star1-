@@ -26,13 +26,16 @@ from selenium.common.exceptions import TimeoutException, NoSuchElementException,
 BASE_URL = "https://heritage2.itqan-consultant.com/Web/"
 LOGIN_URL = "https://heritage2.itqan-consultant.com/Web/App/Home/Login"
 DATAVIEW_URL = "https://heritage2.itqan-consultant.com/Web/App/Pools/DataView"
-# صفحة "بيانات المعماري" لأي موقع تُبنى مباشرة من كوده (رقم) - تم تأكيدها سابقاً
-# مثال حقيقي: https://heritage2.itqan-consultant.com/Web/App/Pools/DataEdit/11205/7
+# صفحة "بيانات المعماري" لأي موقع تُبنى مباشرة من كوده (رقم) - تم تأكيدها من
+# HTML خام حقيقي (form action="./7"، وتاب "بيانات المعماري" برابط href="7")
 ARCHITECT_DATA_URL_TEMPLATE = "https://heritage2.itqan-consultant.com/Web/App/Pools/DataEdit/{site_id}/7"
 
-# ⚠️ ملاحظة مهمة: بادئة أرقام العناصر (ctlXX) تختلف من صفحة لأخرى في هذا النظام
-# (ASP.NET WebForms) - صفحة تسجيل الدخول تستخدم "ctl112"، بينما صفحة دليل
-# المواقع (DataView) تستخدم "ctl12" - هذه ليست غلطة كتابية.
+# ⚠️ ملاحظة: بادئة أرقام عناصر ASP.NET (ctlXX) قد تختلف من صفحة لأخرى في هذا
+# النظام. صفحتا دليل المواقع (DataView) وبيانات المعماري (DataEdit/{id}/7)
+# مؤكدتان من HTML خام أنهما تستخدمان "ctl12". أما صفحة تسجيل الدخول فقيمة
+# "ctl112" مأخوذة من قراءة صورة (سكرين شوت) لا HTML خام، فاحتمال خطأ قراءة
+# رقمي (12 مقابل 112) وارد ولم يُتحقق منه بنفس درجة اليقين - إذا فشل تسجيل
+# الدخول أول تشغيل، هذا أول مكان يجب التحقق منه.
 GRIDVIEW_ID = "ctl12_GridView1"                 # مؤكد من HTML صفحة DataView
 GRIDVIEW_POSTBACK_TARGET = "ctl12$GridView1"    # مستخدم مع __doPostBack للترقيم
 RESULTS_COUNT_LABEL_ID = "ctl12_lblCount"       # نص: "نتيجة البحث: N موقع"
@@ -42,6 +45,7 @@ STEP_FILTER_SELECT_NAME = "ctl12$ctl32"         # فلتر "الخطوة"
 REGION_FILTER_VALUE_ALBAHA = "12"               # قيمة خيار "الباحة" بقائمة المنطقة
 STEP_FILTER_VALUE_INITIAL_REG = "700"           # قيمة خيار "التسجيل المبدئي" بقائمة الخطوة
 RESULTS_PER_PAGE = 25
+SAVE_BUTTON_ID = "ctl12_btnSave"                # مؤكد من HTML صفحة DataEdit/{id}/7
 
 USERNAME = os.environ.get("HERITAGE_USERNAME")
 PASSWORD = os.environ.get("HERITAGE_PASSWORD")
@@ -281,7 +285,12 @@ class HeritageDriver:
             logger.info("✓ تم إغلاق المتصفح")
 
     def login(self) -> bool:
-        """تسجيل الدخول"""
+        """تسجيل الدخول
+
+        ⚠️ selectors هذه مأخوذة من قراءة صورة (سكرين شوت) للصفحة، وليس من HTML
+        خام كما هو الحال لبقية الصفحات في هذا الملف. رقم "ctl112" احتمال يكون
+        قراءة غير دقيقة لـ "ctl12" (نفس البادئة المؤكدة بكل الصفحات الأخرى).
+        إذا فشل تسجيل الدخول عند أول تشغيل فعلي، أول شي نتحقق منه هنا."""
         try:
             logger.info("🔐 جاري تسجيل الدخول...")
             self.driver.get(LOGIN_URL)
@@ -442,8 +451,8 @@ class HeritageDriver:
         try:
             self.driver.get(site_url)
 
-            # ننتظر عنصراً مؤكداً من هذه الصفحة تحديداً: زر الحفظ (id=ctl112_btnSave)
-            self.wait.until(EC.presence_of_element_located((By.ID, "ctl112_btnSave")))
+            # ننتظر عنصراً مؤكداً من هذه الصفحة تحديداً: زر الحفظ (id=ctl12_btnSave)
+            self.wait.until(EC.presence_of_element_located((By.ID, SAVE_BUTTON_ID)))
             time.sleep(0.5)
             return True
         except Exception as e:
@@ -508,12 +517,13 @@ class HeritageDriver:
             return False, f"error: {str(e)}"
 
     def save_form(self) -> bool:
-        """حفظ الاستمارة (زر مؤكد: id=ctl112_btnSave، value='حفظ بيانات الاستمارة')"""
+        """حفظ الاستمارة (زر مؤكد من HTML خام: id=ctl12_btnSave،
+        value='حـفــظ بيانــات الاستمـــارة')"""
         try:
             logger.info("  ↳ جاري حفظ الاستمارة...")
 
             save_button = self.wait.until(
-                EC.element_to_be_clickable((By.ID, "ctl112_btnSave"))
+                EC.element_to_be_clickable((By.ID, SAVE_BUTTON_ID))
             )
             save_button.click()
 

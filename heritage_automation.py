@@ -452,24 +452,6 @@ class HeritageDriver:
             logger.warning(f"⚠️ خطأ في فتح الموقع: {e}")
             return False
 
-    def navigate_to_architect_data(self) -> bool:
-        """الانتقال إلى صفحة بيانات المعماري"""
-        try:
-            logger.info("  ↳ جاري الانتقال إلى بيانات المعماري...")
-
-            # البحث عن التاب "بيانات المعماري"
-            architect_tab = self.wait.until(
-                EC.element_to_be_clickable((By.XPATH, "//a[contains(text(), 'بيانات المعماري')]"))
-            )
-            architect_tab.click()
-            time.sleep(1)
-
-            logger.info("  ✓ تم الانتقال إلى بيانات المعماري")
-            return True
-        except Exception as e:
-            logger.warning(f"  ✗ خطأ في الانتقال: {e}")
-            return False
-
     def update_region(self) -> Tuple[bool, str]:
         """تحديث حقل 'الطراز المعماري' (قسم 4) لاختيار 'المنطقة الجنوبية'.
 

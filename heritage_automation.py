@@ -37,7 +37,6 @@ LOGIN_USERNAME_FIELD_NAME = "ctl12$ctl03"       # مؤكد من HTML صفحة /H
 LOGIN_PASSWORD_FIELD_NAME = "ctl12$ctl07"       # مؤكد من HTML صفحة /Home/Login
 LOGIN_BUTTON_ID = "ctl12_btnLogin"              # مؤكد من HTML صفحة /Home/Login
 GRIDVIEW_ID = "ctl12_GridView1"                 # مؤكد من HTML صفحة DataView
-GRIDVIEW_POSTBACK_TARGET = "ctl12$GridView1"    # مستخدم مع __doPostBack للترقيم
 RESULTS_COUNT_LABEL_ID = "ctl12_lblCount"       # نص: "نتيجة البحث: N موقع"
 SEARCH_BUTTON_ID = "ctl12_btnSearch"
 REGION_FILTER_SELECT_NAME = "ctl12$ctl08"       # فلتر "المنطقة" الجغرافية (محافظات المملكة)
@@ -404,20 +403,57 @@ class HeritageDriver:
             return False
 
     def goto_gridview_page(self, page_number: int) -> bool:
-        """الانتقال مباشرة إلى رقم صفحة معين داخل الجدول عبر __doPostBack
-        (يعمل حتى لو رقم الصفحة غير ظاهر في شريط الترقيم المرئي)"""
+        """الانتقال إلى صفحة معينة بالجدول عبر نقر حقيقي على رابط رقم الصفحة
+        بشريط الترقيم.
+
+        ⚠️ سابقاً كنا نستخدم __doPostBack عبر execute_script، لكن اختبار
+        حقيقي فشل بخطأ متصفح غير متعلق بمنطقنا: "'caller', 'callee', and
+        'arguments' properties may not be accessed on strict mode functions"
+        - خلل توافق معروف بين إصدارات Chrome/chromedriver الحديثة وآلية
+        execute_script بـ Selenium. النقر الحقيقي على الرابط يتجنب المشكلة
+        كلياً لأنه لا يستدعي execute_script إطلاقاً.
+
+        شريط الترقيم يعرض نافذة من 10 أرقام كحد أقصى + رابط "..." للانتقال
+        للنافذة التالية (وربما "..." آخر للنافذة السابقة بعد الصفحة الأولى) -
+        نأخذ آخر رابط "..." بترتيب DOM دائماً لضمان الانتقال للأمام لا للخلف."""
         try:
-            # نحتفظ بمرجع للجدول القديم للتأكد من إعادة تحميله (postback) قبل المتابعة
             old_table = self.driver.find_element(By.ID, GRIDVIEW_ID)
 
-            self.driver.execute_script(
-                f"__doPostBack('{GRIDVIEW_POSTBACK_TARGET}','Page${page_number}')"
-            )
+            try:
+                page_link = self.driver.find_element(
+                    By.XPATH,
+                    f"//tr[contains(@class,'Pagger')]//a[normalize-space(text())='{page_number}']"
+                )
+            except NoSuchElementException:
+                ellipsis_links = self.driver.find_elements(
+                    By.XPATH, "//tr[contains(@class,'Pagger')]//a[normalize-space(text())='...']"
+                )
+                if not ellipsis_links:
+                    logger.error(f"❌ لم يُعثر على رابط الصفحة {page_number} ولا رابط '...' للانتقال")
+                    return False
+                page_link = ellipsis_links[-1]  # الأخير بترتيب DOM = الانتقال للأمام
 
-            # ننتظر أن يصبح الجدول القديم "stale" (تم استبداله فعلياً بعد الـ postback)
+            self._safe_click(page_link)
+
             self.wait.until(EC.staleness_of(old_table))
             self.wait.until(EC.presence_of_element_located((By.ID, GRIDVIEW_ID)))
             time.sleep(0.5)
+
+            # تحقق من وصولنا فعلاً للصفحة الصحيحة (الرقم بدون رابط = الصفحة
+            # الحالية بشريط الترقيم) - مهم لأننا نتعامل مع بيانات حقيقية
+            try:
+                active_page_text = self.driver.find_element(
+                    By.XPATH, "//tr[contains(@class,'Pagger')]//span"
+                ).text.strip()
+                if active_page_text != str(page_number):
+                    logger.error(
+                        f"❌ توقعنا الوصول لصفحة {page_number} لكن الصفحة الفعلية "
+                        f"الحالية هي {active_page_text} - توقف احترازي"
+                    )
+                    return False
+            except Exception:
+                logger.warning("⚠️ تعذر التحقق من رقم الصفحة الحالي من شريط الترقيم")
+
             return True
         except Exception as e:
             logger.warning(f"⚠️ خطأ في الانتقال إلى صفحة {page_number}: {e}")

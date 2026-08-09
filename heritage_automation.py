@@ -320,11 +320,28 @@ class HeritageDriver:
     def login(self, retries: int = LOGIN_MAX_RETRIES) -> bool:
         """تسجيل الدخول (selectors مؤكدة 100% من HTML خام لصفحة /Home/Login).
         المنصة أحياناً بتتعلق/تبطئ، فهذي الخطوة تحديداً تنتظر مدة أطول
-        (LOGIN_WAIT_SECONDS) وتعيد المحاولة عدة مرات قبل ما تفشل نهائياً."""
+        (LOGIN_WAIT_SECONDS) وتعيد المحاولة عدة مرات قبل ما تفشل نهائياً.
+
+        ⚠️ بما أن المتصفح يستخدم بروفايل Chrome محفوظ بين التشغيلات (لتبقى
+        الجلسة قائمة)، فإذا كانت الجلسة مسجلة دخول أصلاً (من محاولة سابقة أو
+        تشغيلة سابقة)، خادم المنصة لا يعرض نموذج اليوزر/الباسورد إطلاقاً عند
+        فتح /Login - فنتحقق من ذلك أولاً ونتخطى تعبئة النموذج إن كانت الجلسة
+        فعّالة أصلاً، بدل ما ننتظر عبثاً حقلاً غير موجود."""
         for attempt in range(1, retries + 1):
             try:
                 logger.info(f"🔐 جاري تسجيل الدخول... (محاولة {attempt}/{retries})")
                 self.driver.get(LOGIN_URL)
+
+                # تحقق سريع: هل الجلسة مسجلة دخول أصلاً؟ (بروفايل محفوظ من
+                # تشغيلة/محاولة سابقة) - إن كانت كذلك، لا داعي لتعبئة النموذج
+                try:
+                    WebDriverWait(self.driver, 5).until(
+                        EC.presence_of_element_located((By.ID, "TopBar_lblName"))
+                    )
+                    logger.info("✓ الجلسة مسجلة دخول أصلاً (من تشغيلة سابقة) - تخطي نموذج الدخول")
+                    return True
+                except TimeoutException:
+                    pass  # لسا صفحة الدخول الفعلية ظاهرة، كمل بالتعبئة العادية أدناه
 
                 # إدخال اسم المستخدم (name="ctl12$ctl03")
                 username_field = self.wait.until(
@@ -357,10 +374,10 @@ class HeritageDriver:
 
                 logger.info(f"✓ تم تسجيل الدخول بنجاح - الرابط الحالي: {self.driver.current_url}")
                 return True
-            except TimeoutException:
+            except TimeoutException as e:
                 logger.warning(
-                    f"⚠️ انتهت مهلة الانتظار ({LOGIN_WAIT_SECONDS}s) بالمحاولة {attempt}/{retries} "
-                    "- الصفحة لم تتغير (يُحتمل بطء بالمنصة أو خطأ باليوزر/الباسورد)"
+                    f"⚠️ انتهت مهلة انتظار عنصر خلال محاولة تسجيل الدخول {attempt}/{retries} "
+                    f"(يُحتمل بطء بالمنصة أو خطأ باليوزر/الباسورد أو تغيّر بهيكل الصفحة): {e}"
                 )
                 if attempt == retries:
                     self.save_debug_snapshot("login_failure_debug")

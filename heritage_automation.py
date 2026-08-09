@@ -6,6 +6,7 @@ Automation for Heritage Platform - Mass Update Script
 """
 
 import os
+import re
 import json
 import sqlite3
 import time
@@ -16,7 +17,7 @@ from typing import Dict, List, Tuple, Optional
 import pandas as pd
 from selenium import webdriver
 from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support.ui import WebDriverWait, Select
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
 from selenium.common.exceptions import TimeoutException, NoSuchElementException, StaleElementReferenceException
@@ -25,10 +26,29 @@ from selenium.common.exceptions import TimeoutException, NoSuchElementException,
 BASE_URL = "https://heritage2.itqan-consultant.com/Web/"
 LOGIN_URL = "https://heritage2.itqan-consultant.com/Web/App/Home/Login"
 DATAVIEW_URL = "https://heritage2.itqan-consultant.com/Web/App/Pools/DataView"
-GRIDVIEW_ID = "ctl112_GridView1"
+# صفحة "بيانات المعماري" لأي موقع تُبنى مباشرة من كوده (رقم) - تم تأكيدها سابقاً
+# مثال حقيقي: https://heritage2.itqan-consultant.com/Web/App/Pools/DataEdit/11205/7
+ARCHITECT_DATA_URL_TEMPLATE = "https://heritage2.itqan-consultant.com/Web/App/Pools/DataEdit/{site_id}/7"
+
+# ⚠️ ملاحظة مهمة: بادئة أرقام العناصر (ctlXX) تختلف من صفحة لأخرى في هذا النظام
+# (ASP.NET WebForms) - صفحة تسجيل الدخول تستخدم "ctl112"، بينما صفحة دليل
+# المواقع (DataView) تستخدم "ctl12" - هذه ليست غلطة كتابية.
+GRIDVIEW_ID = "ctl12_GridView1"                 # مؤكد من HTML صفحة DataView
+GRIDVIEW_POSTBACK_TARGET = "ctl12$GridView1"    # مستخدم مع __doPostBack للترقيم
+RESULTS_COUNT_LABEL_ID = "ctl12_lblCount"       # نص: "نتيجة البحث: N موقع"
+SEARCH_BUTTON_ID = "ctl12_btnSearch"
+REGION_FILTER_SELECT_NAME = "ctl12$ctl08"       # فلتر "المنطقة" الجغرافية (محافظات المملكة)
+STEP_FILTER_SELECT_NAME = "ctl12$ctl32"         # فلتر "الخطوة"
+REGION_FILTER_VALUE_ALBAHA = "12"               # قيمة خيار "الباحة" بقائمة المنطقة
+STEP_FILTER_VALUE_INITIAL_REG = "700"           # قيمة خيار "التسجيل المبدئي" بقائمة الخطوة
 RESULTS_PER_PAGE = 25
+
 USERNAME = os.environ.get("HERITAGE_USERNAME")
 PASSWORD = os.environ.get("HERITAGE_PASSWORD")
+
+# "المنطقة الجنوبية" هنا تخص حقل "الطراز المعماري" داخل نموذج بيانات الموقع
+# (radio button ضمن تبويب بيانات المعماري) - لا علاقة لها بفلتر "المنطقة"
+# الجغرافي أعلاه رغم تشابه الاسم.
 TARGET_REGION = "المنطقة الجنوبية"
 REGION_FIELD_NUMBER = 4
 
@@ -322,7 +342,7 @@ class HeritageDriver:
             old_table = self.driver.find_element(By.ID, GRIDVIEW_ID)
 
             self.driver.execute_script(
-                f"__doPostBack('ctl112$GridView1','Page${page_number}')"
+                f"__doPostBack('{GRIDVIEW_POSTBACK_TARGET}','Page${page_number}')"
             )
 
             # ننتظر أن يصبح الجدول القديم "stale" (تم استبداله فعلياً بعد الـ postback)
@@ -335,40 +355,31 @@ class HeritageDriver:
             return False
 
     def apply_filters(self) -> bool:
-        """تطبيق الفلاتر (المنطقة والخطوة)"""
+        """تطبيق الفلاتر: المنطقة=الباحة (value=12) والخطوة=التسجيل المبدئي (value=700)
+        باستخدام القيم الرقمية الثابتة (value) بدل نص الخيار - أضمن من مطابقة النص"""
         try:
             logger.info("🔍 جاري تطبيق الفلاتر...")
 
-            # اختيار المنطقة: الباحة
-            region_dropdown = self.wait.until(
-                EC.presence_of_element_located((By.NAME, "ddlRegion"))
-            )
-            region_dropdown.click()
+            old_count_label = self.driver.find_element(By.ID, RESULTS_COUNT_LABEL_ID)
+
+            # اختيار المنطقة: الباحة (value=12)
+            region_select = Select(self.driver.find_element(By.NAME, REGION_FILTER_SELECT_NAME))
+            region_select.select_by_value(REGION_FILTER_VALUE_ALBAHA)
+            time.sleep(1.5)  # تحديث تلقائي (AJAX) لقوائم الفرع/المحافظة المرتبطة
+
+            # اختيار الخطوة: التسجيل المبدئي (value=700)
+            step_select = Select(self.driver.find_element(By.NAME, STEP_FILTER_SELECT_NAME))
+            step_select.select_by_value(STEP_FILTER_VALUE_INITIAL_REG)
             time.sleep(1)
 
-            # البحث عن خيار الباحة
-            region_option = self.wait.until(
-                EC.element_to_be_clickable((By.XPATH, "//option[contains(text(), 'الباحة')]"))
-            )
-            region_option.click()
+            # الضغط على زر "بحث" لتطبيق الفلترة فعلياً على الجدول
+            search_button = self.driver.find_element(By.ID, SEARCH_BUTTON_ID)
+            search_button.click()
+
+            # ننتظر تحديث تسمية عدد النتائج (يثبت أن نتائج الفلترة وصلت)
+            self.wait.until(EC.staleness_of(old_count_label))
+            self.wait.until(EC.presence_of_element_located((By.ID, RESULTS_COUNT_LABEL_ID)))
             time.sleep(1)
-
-            # اختيار الخطوة: التسجيل المبدأي
-            step_dropdown = self.wait.until(
-                EC.presence_of_element_located((By.NAME, "ddlStep"))
-            )
-            step_dropdown.click()
-            time.sleep(1)
-
-            step_option = self.wait.until(
-                EC.element_to_be_clickable((By.XPATH, "//option[contains(text(), 'التسجيل المبدأي')]"))
-            )
-            step_option.click()
-            time.sleep(2)
-
-            # انتظر تحميل البيانات
-            logger.info("⏳ جاري تحميل البيانات...")
-            time.sleep(3)
 
             logger.info("✓ تم تطبيق الفلاتر بنجاح")
             return True
@@ -377,27 +388,28 @@ class HeritageDriver:
             return False
 
     def get_total_results_count(self) -> int:
-        """قراءة عدد النتائج الإجمالي من نص مثل: 'نتيجة البحث: 5256 موقع'"""
+        """قراءة عدد النتائج الإجمالي من ctl12_lblCount، نصه مثل: 'نتيجة البحث: 5256  موقع'"""
         try:
-            import re
-            body_text = self.driver.find_element(By.XPATH, "//*[contains(text(), 'نتيجة البحث')]").text
-            match = re.search(r'(\d+)', body_text.replace(',', ''))
+            label_text = self.driver.find_element(By.ID, RESULTS_COUNT_LABEL_ID).text
+            match = re.search(r'(\d+)', label_text.replace(',', ''))
             return int(match.group(1)) if match else 0
         except Exception as e:
             logger.warning(f"⚠️ تعذر قراءة إجمالي النتائج: {e}")
             return 0
 
     def extract_all_site_links(self) -> List[Tuple[str, str, str]]:
-        """استخراج جميع روابط المواقع (مع pagination)"""
+        """استخراج أكواد وأسماء المواقع من الصفحة الحالية (بدون الحاجة لأي رابط
+        بالجدول - الرابط يُبنى لاحقاً مباشرة من الكود عبر ARCHITECT_DATA_URL_TEMPLATE)"""
         sites = []
         try:
-            logger.info("📥 جاري استخراج روابط المواقع...")
+            logger.info("📥 جاري استخراج المواقع من الصفحة الحالية...")
 
-            # ⚠️ TODO غير مؤكد بعد: بنية خلايا الصف الفعلية (ترتيب الأعمدة، ورابط
-            # "استمارة التسجيل" الحقيقي). الكود أدناه أفضل تخمين حالياً بانتظار
-            # تأكيد من HTML صف بيانات حقيقي (وليس صف الترقيم/الرأس).
+            # ملاحظة: صف الرأس يستخدم <th> (يُستبعد تلقائياً لعدم وجود <td> فيه)،
+            # وصف الترقيم (Pagger) نستبعده صراحة لأنه يحتوي <td> بجدول متداخل
             table = self.driver.find_element(By.ID, GRIDVIEW_ID)
-            rows = table.find_elements(By.XPATH, ".//tbody/tr[not(contains(@class, 'Pagger')) and not(contains(@class,'Header'))]")
+            rows = table.find_elements(
+                By.XPATH, ".//tbody/tr[not(contains(@class, 'Pagger'))]"
+            )
             logger.info(f"📌 عدد الصفوف في الصفحة الحالية: {len(rows)}")
 
             for row in rows:
@@ -411,16 +423,11 @@ class HeritageDriver:
                     if not site_id.isdigit():
                         continue
 
-                    # رابط "استمارة التسجيل" لفتح السجل - غالباً ضمن إحدى آخر الخلايا
-                    site_link = row.find_element(
-                        By.XPATH, ".//a[contains(text(), 'استمارة التسجيل')]"
-                    )
                     site_name = cells[1].text.strip() if len(cells) > 1 else site_id
-                    site_url = site_link.get_attribute('href')
+                    site_url = ARCHITECT_DATA_URL_TEMPLATE.format(site_id=site_id)
 
-                    if site_id and site_url:
-                        sites.append((site_id, site_name, site_url))
-                        logger.debug(f"  └─ {site_id}: {site_name}")
+                    sites.append((site_id, site_name, site_url))
+                    logger.debug(f"  └─ {site_id}: {site_name}")
                 except Exception as e:
                     logger.warning(f"⚠️ خطأ في استخراج صف: {e}")
                     continue
@@ -432,13 +439,13 @@ class HeritageDriver:
             return sites
 
     def open_site(self, site_url: str) -> bool:
-        """فتح صفحة الموقع"""
+        """فتح صفحة الموقع (تفتح مباشرة على تاب "بيانات المعماري" بفضل الرابط المباشر)"""
         try:
             self.driver.get(site_url)
-            time.sleep(2)
 
-            # التحقق من أن الصفحة تحملت
-            self.wait.until(EC.presence_of_element_located((By.CLASS_NAME, "site-details")))
+            # ننتظر عنصراً مؤكداً من هذه الصفحة تحديداً: زر الحفظ (id=ctl112_btnSave)
+            self.wait.until(EC.presence_of_element_located((By.ID, "ctl112_btnSave")))
+            time.sleep(0.5)
             return True
         except Exception as e:
             logger.warning(f"⚠️ خطأ في فتح الموقع: {e}")
@@ -650,15 +657,10 @@ class HeritageAutomation:
             steps = []
 
             try:
-                # فتح الموقع
-                steps.append("فتح الموقع")
+                # فتح الموقع (يفتح مباشرة على تاب بيانات المعماري عبر الرابط المباشر)
+                steps.append("فتح صفحة بيانات المعماري")
                 if not self.driver_manager.open_site(site_url):
                     raise Exception("فشل فتح الموقع")
-
-                # الانتقال إلى بيانات المعماري
-                steps.append("الانتقال إلى بيانات المعماري")
-                if not self.driver_manager.navigate_to_architect_data():
-                    raise Exception("فشل الانتقال")
 
                 # تحديث المنطقة
                 steps.append("تحديث المنطقة")

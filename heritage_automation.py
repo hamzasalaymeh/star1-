@@ -46,11 +46,10 @@ RESULTS_PER_PAGE = 25
 USERNAME = os.environ.get("HERITAGE_USERNAME")
 PASSWORD = os.environ.get("HERITAGE_PASSWORD")
 
-# "المنطقة الجنوبية" هنا تخص حقل "الطراز المعماري" داخل نموذج بيانات الموقع
-# (radio button ضمن تبويب بيانات المعماري) - لا علاقة لها بفلتر "المنطقة"
-# الجغرافي أعلاه رغم تشابه الاسم.
+# "المنطقة الجنوبية" هنا تخص حقل "الطراز المعماري" (radio button، قسم 4)
+# داخل نموذج بيانات الموقع بتبويب بيانات المعماري - لا علاقة لها بفلتر
+# "المنطقة" الجغرافي أعلاه رغم تشابه الاسم.
 TARGET_REGION = "المنطقة الجنوبية"
-REGION_FIELD_NUMBER = 4
 
 if not USERNAME or not PASSWORD:
     raise SystemExit(
@@ -470,41 +469,39 @@ class HeritageDriver:
             return False
 
     def update_region(self) -> Tuple[bool, str]:
-        """تحديث المنطقة إلى "المنطقة الجنوبية" """
+        """تحديث حقل 'الطراز المعماري' (قسم 4) لاختيار 'المنطقة الجنوبية'.
+
+        ⚠️ مؤكد من HTML حقيقي: هذا الحقل عبارة عن radio buttons منفصلة عن
+        بعضها (وليس <select> كما كان مفترضاً سابقاً)، كل واحد له <label>
+        مستقل يحمل خاصية for تشير لمعرّف الـ <input type="radio">."""
         try:
             logger.info("  ↳ جاري تحديث المنطقة...")
 
-            # الوصول إلى حقل المنطقة رقم 4
-            region_field = self.wait.until(
-                EC.presence_of_element_located((By.NAME, f"Region{REGION_FIELD_NUMBER}"))
+            labels = self.wait.until(
+                EC.presence_of_all_elements_located(
+                    (By.XPATH, f"//label[normalize-space(text())='{TARGET_REGION}']")
+                )
             )
+            if len(labels) > 1:
+                logger.warning(f"  ⚠️ عثر على {len(labels)} تطابقات لِـ '{TARGET_REGION}' - سيُستخدم الأول")
+            label = labels[0]
 
-            # الحصول على القيمة الحالية
-            current_value = region_field.get_attribute('value')
+            radio_id = label.get_attribute('for')
+            radio = self.driver.find_element(By.ID, radio_id)
 
-            # إذا كانت مختارة بالفعل
-            if TARGET_REGION in current_value or "جنوبية" in current_value:
-                logger.info(f"  ⏭️  المنطقة مختارة بالفعل: {current_value}")
+            if radio.is_selected():
+                logger.info("  ⏭️  المنطقة مختارة بالفعل (المنطقة الجنوبية)")
                 return True, "skipped"
 
-            # النقر على dropdown
-            region_field.click()
+            # النقر على الـ label (أضمن من input مباشرة، فقد يكون مغطى بصرياً)
+            label.click()
             time.sleep(0.5)
 
-            # اختيار المنطقة الجنوبية
-            option = self.wait.until(
-                EC.element_to_be_clickable((By.XPATH, f"//option[contains(text(), 'المنطقة الجنوبية')]"))
-            )
-            option.click()
-            time.sleep(1)
-
-            # التحقق من التحديث
-            updated_value = region_field.get_attribute('value')
-            if TARGET_REGION in updated_value or "جنوبية" in updated_value:
-                logger.info(f"  ✓ تم تحديث المنطقة بنجاح")
+            if radio.is_selected():
+                logger.info("  ✓ تم تحديث المنطقة بنجاح")
                 return True, "updated"
             else:
-                logger.warning(f"  ⚠️ فشل التحديث - القيمة الحالية: {updated_value}")
+                logger.warning("  ⚠️ فشل التحديث - الخيار لم يُحدد بعد النقر")
                 return False, "failed"
         except Exception as e:
             logger.warning(f"  ✗ خطأ في تحديث المنطقة: {e}")

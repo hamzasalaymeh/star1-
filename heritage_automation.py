@@ -344,10 +344,14 @@ class HeritageDriver:
                 login_button = self.driver.find_element(By.ID, LOGIN_BUTTON_ID)
                 self._safe_click(login_button)
 
-                # انتظر تحميل الصفحة بعد تسجيل الدخول (تأكد أننا خرجنا من صفحة
-                # /Login) - مهلة أطول من الافتراضي لأن المنصة أحياناً تتعلق
+                # ⚠️ هذه المنصة لا تُغيّر رابط الصفحة بعد تسجيل الدخول (تحدّث
+                # المحتوى عبر AJAX/UpdatePanel وتبقى على /Login في شريط
+                # العنوان). لذلك العلامة الصحيحة على نجاح الدخول هي ظهور
+                # عنصر لا يظهر إلا بعد المصادقة: اسم المستخدم بأعلى الصفحة
+                # (id=TopBar_lblName) - تم تأكيدها من لقطة تشخيصية حقيقية
+                # أظهرت "Mohammed sobhy" رغم بقاء الرابط على /Login.
                 WebDriverWait(self.driver, LOGIN_WAIT_SECONDS).until(
-                    lambda d: "/Login" not in d.current_url
+                    EC.presence_of_element_located((By.ID, "TopBar_lblName"))
                 )
                 time.sleep(2)
 

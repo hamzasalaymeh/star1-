@@ -1,3 +1,12 @@
 node_modules/
 package-lock.json
 package.json
+
+# Heritage automation - local outputs & secrets (never commit)
+.env
+heritage_automation.db
+heritage_automation.log
+checkpoint.json
+heritage_report.xlsx
+__pycache__/
+*.pyc

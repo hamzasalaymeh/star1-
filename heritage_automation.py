@@ -73,6 +73,8 @@ LOG_FILE = Path("heritage_automation.log")
 HEADLESS = True
 IMPLICIT_WAIT = 10
 EXPLICIT_WAIT = 20
+LOGIN_WAIT_SECONDS = 60   # المنصة أحياناً تتعلق/تبطئ أثناء تسجيل الدخول تحديداً
+LOGIN_MAX_RETRIES = 3     # عدد محاولات إعادة تسجيل الدخول قبل الفشل النهائي
 
 # ==================== إعداد Logging ====================
 logging.basicConfig(
@@ -301,42 +303,70 @@ class HeritageDriver:
             self.driver.quit()
             logger.info("✓ تم إغلاق المتصفح")
 
-    def login(self) -> bool:
-        """تسجيل الدخول (selectors مؤكدة 100% من HTML خام لصفحة /Home/Login)"""
+    def save_debug_snapshot(self, name: str):
+        """حفظ صورة شاشة + مصدر الصفحة الحالية للتشخيص (يُستخدم عند فشل خطوة
+        حرجة مثل تسجيل الدخول، لأن المتصفح يعمل بالخلفية بدون نافذة مرئية)"""
         try:
-            logger.info("🔐 جاري تسجيل الدخول...")
-            self.driver.get(LOGIN_URL)
-
-            # إدخال اسم المستخدم (name="ctl12$ctl03")
-            username_field = self.wait.until(
-                EC.presence_of_element_located((By.NAME, LOGIN_USERNAME_FIELD_NAME))
-            )
-            username_field.clear()
-            username_field.send_keys(USERNAME)
-            time.sleep(0.5)
-
-            # إدخال كلمة المرور (name="ctl12$ctl07")
-            password_field = self.driver.find_element(By.NAME, LOGIN_PASSWORD_FIELD_NAME)
-            password_field.clear()
-            password_field.send_keys(PASSWORD)
-            time.sleep(0.5)
-
-            # النقر على زر "تسجيل الدخول" (id=ctl12_btnLogin)
-            login_button = self.driver.find_element(By.ID, LOGIN_BUTTON_ID)
-            self._safe_click(login_button)
-
-            # انتظر تحميل الصفحة بعد تسجيل الدخول (تأكد أننا خرجنا من صفحة /Login)
-            self.wait.until(lambda d: "/Login" not in d.current_url)
-            time.sleep(2)
-
-            logger.info(f"✓ تم تسجيل الدخول بنجاح - الرابط الحالي: {self.driver.current_url}")
-            return True
-        except TimeoutException:
-            logger.error("✗ انتهت مهلة الانتظار - فشل تسجيل الدخول (تحقق من صحة اليوزر/الباسورد)")
-            return False
+            screenshot_path = f"{name}.png"
+            html_path = f"{name}.html"
+            self.driver.save_screenshot(screenshot_path)
+            with open(html_path, "w", encoding="utf-8") as f:
+                f.write(self.driver.page_source)
+            logger.info(f"🖼️  تم حفظ لقطة تشخيصية: {screenshot_path} و {html_path}")
+            logger.info(f"🔗 الرابط الحالي وقت الفشل: {self.driver.current_url}")
         except Exception as e:
-            logger.error(f"✗ خطأ في تسجيل الدخول: {e}")
-            return False
+            logger.warning(f"⚠️ تعذر حفظ اللقطة التشخيصية: {e}")
+
+    def login(self, retries: int = LOGIN_MAX_RETRIES) -> bool:
+        """تسجيل الدخول (selectors مؤكدة 100% من HTML خام لصفحة /Home/Login).
+        المنصة أحياناً بتتعلق/تبطئ، فهذي الخطوة تحديداً تنتظر مدة أطول
+        (LOGIN_WAIT_SECONDS) وتعيد المحاولة عدة مرات قبل ما تفشل نهائياً."""
+        for attempt in range(1, retries + 1):
+            try:
+                logger.info(f"🔐 جاري تسجيل الدخول... (محاولة {attempt}/{retries})")
+                self.driver.get(LOGIN_URL)
+
+                # إدخال اسم المستخدم (name="ctl12$ctl03")
+                username_field = self.wait.until(
+                    EC.presence_of_element_located((By.NAME, LOGIN_USERNAME_FIELD_NAME))
+                )
+                username_field.clear()
+                username_field.send_keys(USERNAME)
+                time.sleep(0.5)
+
+                # إدخال كلمة المرور (name="ctl12$ctl07")
+                password_field = self.driver.find_element(By.NAME, LOGIN_PASSWORD_FIELD_NAME)
+                password_field.clear()
+                password_field.send_keys(PASSWORD)
+                time.sleep(0.5)
+
+                # النقر على زر "تسجيل الدخول" (id=ctl12_btnLogin)
+                login_button = self.driver.find_element(By.ID, LOGIN_BUTTON_ID)
+                self._safe_click(login_button)
+
+                # انتظر تحميل الصفحة بعد تسجيل الدخول (تأكد أننا خرجنا من صفحة
+                # /Login) - مهلة أطول من الافتراضي لأن المنصة أحياناً تتعلق
+                WebDriverWait(self.driver, LOGIN_WAIT_SECONDS).until(
+                    lambda d: "/Login" not in d.current_url
+                )
+                time.sleep(2)
+
+                logger.info(f"✓ تم تسجيل الدخول بنجاح - الرابط الحالي: {self.driver.current_url}")
+                return True
+            except TimeoutException:
+                logger.warning(
+                    f"⚠️ انتهت مهلة الانتظار ({LOGIN_WAIT_SECONDS}s) بالمحاولة {attempt}/{retries} "
+                    "- الصفحة لم تتغير (يُحتمل بطء بالمنصة أو خطأ باليوزر/الباسورد)"
+                )
+                if attempt == retries:
+                    self.save_debug_snapshot("login_failure_debug")
+            except Exception as e:
+                logger.warning(f"⚠️ خطأ بمحاولة تسجيل الدخول {attempt}/{retries}: {e}")
+                if attempt == retries:
+                    self.save_debug_snapshot("login_failure_debug")
+
+        logger.error(f"✗ فشل تسجيل الدخول نهائياً بعد {retries} محاولات")
+        return False
 
     def navigate_to_guide_list(self) -> bool:
         """الانتقال إلى دليل المواقع (رابط مباشر مؤكد)"""

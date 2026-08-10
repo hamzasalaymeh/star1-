@@ -195,6 +195,17 @@ class HeritageDB:
         finally:
             conn.close()
 
+    def reset_failed_to_pending(self) -> int:
+        """إرجاع كل المواقع 'فشل' إلى 'معلق' لإعادة محاولتها. يُرجع عدد المواقع المُعاد تعيينها"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        try:
+            cursor.execute("UPDATE sites SET status = 'pending' WHERE status = 'failed'")
+            conn.commit()
+            return cursor.rowcount
+        finally:
+            conn.close()
+
     def get_pending_sites(self, limit: int = 0) -> List[Tuple]:
         """الحصول على المواقع المعلقة"""
         conn = sqlite3.connect(self.db_path)
@@ -339,6 +350,23 @@ class HeritageDriver:
         if self.driver:
             self.driver.quit()
             logger.info("✓ تم إغلاق المتصفح")
+
+    def restart(self) -> bool:
+        """إعادة تشغيل المتصفح بالكامل - يُستخدم للتعافي من انهيار التبويب
+        (tab crashed)، مشكلة معروفة بـ Chrome بعد ساعات تشغيل خلفي طويل.
+        إعادة تسجيل الدخول عادة سريعة جداً لأن الجلسة محفوظة بنفس البروفايل."""
+        logger.info("🔄 جاري إعادة تشغيل المتصفح (تعافي من انهيار التبويب)...")
+        try:
+            if self.driver:
+                self.driver.quit()
+        except Exception:
+            pass
+        try:
+            self.init_driver()
+            return self.login()
+        except Exception as e:
+            logger.error(f"✗ فشلت إعادة تشغيل المتصفح: {e}")
+            return False
 
     def save_debug_snapshot(self, name: str):
         """حفظ صورة شاشة + مصدر الصفحة الحالية للتشخيص (يُستخدم عند فشل خطوة
@@ -588,15 +616,29 @@ class HeritageDriver:
             return sites
 
     def open_site(self, site_url: str) -> bool:
-        """فتح صفحة الموقع (تفتح مباشرة على تاب "بيانات المعماري" بفضل الرابط المباشر)"""
+        """فتح صفحة الموقع (تفتح مباشرة على تاب "بيانات المعماري" بفضل الرابط
+        المباشر). عند اكتشاف انهيار التبويب (tab crashed - مشكلة معروفة بـ
+        Chrome الخلفي بعد ساعات تشغيل طويلة)، يعيد تشغيل المتصفح تلقائياً
+        ويعيد المحاولة مرة واحدة بدل ما يفشل كل المواقع المتبقية فوراً."""
         try:
             self.driver.get(site_url)
-
-            # ننتظر عنصراً مؤكداً من هذه الصفحة تحديداً: زر الحفظ (id=ctl12_btnSave)
             self.wait.until(EC.presence_of_element_located((By.ID, SAVE_BUTTON_ID)))
             time.sleep(0.5)
             return True
         except Exception as e:
+            if "tab crashed" in str(e).lower():
+                logger.warning("⚠️ انهار تبويب المتصفح - جاري إعادة التشغيل والمحاولة مرة أخرى...")
+                if self.restart():
+                    try:
+                        self.driver.get(site_url)
+                        self.wait.until(EC.presence_of_element_located((By.ID, SAVE_BUTTON_ID)))
+                        time.sleep(0.5)
+                        logger.info("✓ تعافى المتصفح ونجحت إعادة المحاولة")
+                        return True
+                    except Exception as e2:
+                        logger.warning(f"⚠️ فشلت إعادة المحاولة بعد إعادة تشغيل المتصفح: {e2}")
+                        return False
+                return False
             logger.warning(f"⚠️ خطأ في فتح الموقع: {e}")
             return False
 
@@ -670,14 +712,20 @@ class HeritageAutomation:
         self.total_failed = 0
         self.total_skipped = 0
 
-    def run(self, resume_from: Optional[str] = None, limit: Optional[int] = None):
-        """تشغيل الأتمتة. limit: إن حُدد، يعالج هذا العدد فقط من المواقع
-        (مفيد لتجربة سريعة قبل التشغيل الكامل على كل المواقع)"""
+    def run(self, resume_from: Optional[str] = None, limit: Optional[int] = None,
+            retry_failed_only: bool = False):
+        """تشغيل الأتمتة.
+        limit: إن حُدد، يعالج هذا العدد فقط من المواقع (تجربة على عينة صغيرة).
+        retry_failed_only: إعادة محاولة المواقع المُعلَّمة 'فشل' فقط، بدون
+        إعادة تسجيل الدخول/الفلترة/استخراج كل المواقع من جديد (أسرع بكثير،
+        ومفيد بعد أعطال مؤقتة مثل انهيار تبويب المتصفح)."""
         start_time = datetime.now()
         logger.info("=" * 50)
         logger.info("🚀 بدء أتمتة منصة التراث العمراني")
         if limit:
             logger.info(f"🧪 وضع تجربة: سيُعالَج {limit} موقع فقط")
+        if retry_failed_only:
+            logger.info("🔁 وضع إعادة المحاولة: سيُعاد فحص المواقع 'فشل' فقط")
         logger.info(f"⏰ وقت البداية: {start_time}")
         logger.info("=" * 50)
 
@@ -689,32 +737,36 @@ class HeritageAutomation:
 
             time.sleep(2)
 
-            # الانتقال إلى دليل المواقع
-            if not self.driver_manager.navigate_to_guide_list():
-                logger.error("❌ فشل الانتقال إلى دليل المواقع")
-                return False
+            if retry_failed_only:
+                reset_count = self.db.reset_failed_to_pending()
+                logger.info(f"🔁 تم إرجاع {reset_count} موقع من 'فشل' إلى 'معلق' لإعادة المحاولة")
+            else:
+                # الانتقال إلى دليل المواقع
+                if not self.driver_manager.navigate_to_guide_list():
+                    logger.error("❌ فشل الانتقال إلى دليل المواقع")
+                    return False
 
-            time.sleep(2)
+                time.sleep(2)
 
-            # تطبيق الفلاتر
-            if not self.driver_manager.apply_filters():
-                logger.error("❌ فشل تطبيق الفلاتر")
-                return False
+                # تطبيق الفلاتر
+                if not self.driver_manager.apply_filters():
+                    logger.error("❌ فشل تطبيق الفلاتر")
+                    return False
 
-            time.sleep(2)
+                time.sleep(2)
 
-            # استخراج المواقع (من جميع الصفحات - هذا جزء مهم يحتاج iteration)
-            all_sites = self._extract_all_paginated_sites(limit=limit)
+                # استخراج المواقع (من جميع الصفحات - هذا جزء مهم يحتاج iteration)
+                all_sites = self._extract_all_paginated_sites(limit=limit)
 
-            if not all_sites:
-                logger.error("❌ لم يتم استخراج أي مواقع")
-                return False
+                if not all_sites:
+                    logger.error("❌ لم يتم استخراج أي مواقع")
+                    return False
 
-            logger.info(f"📊 إجمالي المواقع المستخرجة: {len(all_sites)}")
+                logger.info(f"📊 إجمالي المواقع المستخرجة: {len(all_sites)}")
 
-            # إضافة المواقع للقاعدة
-            for site_id, site_name, site_url in all_sites:
-                self.db.insert_site(site_id, site_name, site_url)
+                # إضافة المواقع للقاعدة
+                for site_id, site_name, site_url in all_sites:
+                    self.db.insert_site(site_id, site_name, site_url)
 
             # معالجة كل موقع
             self._process_all_sites(resume_from, limit)
@@ -914,10 +966,14 @@ if __name__ == "__main__":
         "--limit", type=int, default=None,
         help="معالجة هذا العدد من المواقع فقط (للتجربة على عينة صغيرة قبل التشغيل الكامل)"
     )
+    parser.add_argument(
+        "--retry-failed", action="store_true",
+        help="إعادة محاولة المواقع المُعلَّمة 'فشل' فقط (أسرع - بدون إعادة تسجيل الدخول/فلترة/استخراج من جديد)"
+    )
     args = parser.parse_args()
 
     if args.resume:
         logger.info(f"🔄 استئناف من الموقع: {args.resume}")
 
     automation = HeritageAutomation()
-    automation.run(resume_from=args.resume, limit=args.limit)
+    automation.run(resume_from=args.resume, limit=args.limit, retry_failed_only=args.retry_failed)

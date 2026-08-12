@@ -46,16 +46,23 @@ async def main():
         for i, link in enumerate(form_links, 1):
             try:
                 # رابط تبويب "معايير التصنيف" مباشرة: DataEdit/{id}/10
+                site_id = link.rstrip('/').split('/')[-1]
                 classification_link = link.rstrip('/') + '/10'
                 print(f'\n[{i}/{len(form_links)}] فتح: {classification_link}')
 
                 await exporter.page.goto(classification_link, wait_until=exporter.config['waitForNavigation'])
 
+                # انتظار تحميل الجدول فعلياً (وليس شاشة "جاري التحميل")
+                try:
+                    await exporter.page.wait_for_selector('#ctl12_TemplateRate_GridView1', timeout=15000)
+                except Exception:
+                    pass  # extract_red_box_table() has its own fallback selectors
+
                 # استخراج الجدول
                 table_info = await exporter.extract_red_box_table()
 
                 # اسم الموقع
-                site_name = await exporter.get_site_name()
+                site_name = await exporter.get_site_name(site_id=site_id)
 
                 # التصدير
                 pdf_path = await exporter.export_table_as_clean_pdf(f'{site_name}.pdf', table_info)

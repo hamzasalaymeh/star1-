@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 
 import asyncio
+import io
 import os
 import re
 from pathlib import Path
 from datetime import datetime
+from PIL import Image
 from playwright.async_api import async_playwright, Browser, Page
 
 
@@ -189,8 +191,19 @@ class AdvancedTablePDFExporter:
 
         links = await self.page.evaluate("""
             () => {
+                // Match only the base site link (DataEdit/<id>), not sub-links like
+                // DataEdit/<id>/11 ("ملخص الاستمارة" - form summary)
+                const pattern = /\\/DataEdit\\/\\d+$/;
                 const anchors = document.querySelectorAll('a[href*="DataEdit/"]');
-                return Array.from(anchors).map(a => a.href);
+                const seen = new Set();
+                const result = [];
+                anchors.forEach(a => {
+                    if (pattern.test(a.pathname) && !seen.has(a.href)) {
+                        seen.add(a.href);
+                        result.push(a.href);
+                    }
+                });
+                return result;
             }
         """)
 
@@ -201,16 +214,19 @@ class AdvancedTablePDFExporter:
         return links
 
     async def get_current_page_form_links(self) -> list:
-        """Extract unique DataEdit links from the current results grid page only"""
+        """Extract unique base-site DataEdit links (excluding sub-links like /11) from the current results grid page only"""
         links = await self.page.evaluate("""
             () => {
                 const grid = document.querySelector('#ctl12_GridView1');
                 if (!grid) return [];
+                // Match only the base site link (DataEdit/<id>), not sub-links like
+                // DataEdit/<id>/11 ("ملخص الاستمارة" - form summary)
+                const pattern = /\\/DataEdit\\/\\d+$/;
                 const anchors = grid.querySelectorAll('a[href*="DataEdit/"]');
                 const seen = new Set();
                 const result = [];
                 anchors.forEach(a => {
-                    if (!seen.has(a.href)) {
+                    if (pattern.test(a.pathname) && !seen.has(a.href)) {
                         seen.add(a.href);
                         result.push(a.href);
                     }
@@ -373,12 +389,18 @@ class AdvancedTablePDFExporter:
         except Exception as e:
             print(f'⚠️ خطأ في الانتقال: {str(e)}')
 
-    async def get_site_name(self) -> str:
-        """Extract site name from the page"""
+    async def get_site_name(self, site_id: str = None) -> str:
+        """Extract site name from the page. Falls back to the numeric site ID (from the URL) if no title can be found reliably."""
         print('📍 جارٍ استخراج اسم الموقع...')
 
         site_name = await self.page.evaluate("""
             () => {
+                const LOADING_TEXT = 'جـاري التحميــــل';
+                const isVisible = (el) => el.offsetParent !== null;
+                const isUsable = (text) => text && text.length > 0 &&
+                    !text.includes(LOADING_TEXT) &&
+                    !text.includes('...');
+
                 const selectors = [
                     'h1',
                     '[class*="title"]',
@@ -389,32 +411,40 @@ class AdvancedTablePDFExporter:
 
                 for (const selector of selectors) {
                     const el = document.querySelector(selector);
-                    if (el) {
+                    if (el && isVisible(el)) {
                         const text = (el.innerText || el.textContent || '').trim();
-                        if (text && text.length > 0 && text.length < 200) {
+                        if (isUsable(text) && text.length < 200) {
                             return text;
                         }
                     }
                 }
 
-                // Fallback: Try to get from any element with Arabic text
+                // Fallback: any visible element with Arabic text, excluding the loading placeholder
                 const allElements = document.querySelectorAll('*');
                 for (const el of allElements) {
+                    if (el.closest('.ViewUpdateProgress')) continue;
+                    if (!isVisible(el)) continue;
                     const text = (el.innerText || el.textContent || '').trim();
-                    if (text && /[؀-ۿ]/.test(text) && text.length > 5 && text.length < 100) {
+                    if (isUsable(text) && /[؀-ۿ]/.test(text) && text.length > 5 && text.length < 100) {
                         return text;
                     }
                 }
 
-                return `موقع_${Date.now()}`;
+                return null;
             }
         """)
+
+        if not site_name:
+            site_name = f'موقع_{site_id}' if site_id else f'موقع_{int(datetime.now().timestamp())}'
 
         # Clean the site name for use as filename
         clean_name = site_name
         clean_name = re.sub(r'[\/\\:*?"<>|]', '_', clean_name)  # Remove invalid filename characters
         clean_name = re.sub(r'\s+', '_', clean_name)  # Replace spaces with underscores
         clean_name = clean_name[:100]  # Limit length
+
+        if site_id and site_id not in clean_name:
+            clean_name = f'{clean_name}_{site_id}'
 
         print(f'   اسم الموقع: {site_name}')
         return clean_name
@@ -482,24 +512,24 @@ class AdvancedTablePDFExporter:
         return table_info
 
     async def export_table_as_clean_pdf(self, filename: str, table_info: dict) -> str:
-        """Export table as PDF with clipping"""
+        """Export just the table area as a PDF (Playwright's page.pdf() has no clip option, so this
+        crops a screenshot of the table and wraps that image into a single-page PDF instead)."""
         print(f'📄 جارٍ تحويل الجدول إلى PDF: {filename}')
 
         filepath = os.path.join(self.config['outputDir'], filename)
 
         if table_info and table_info.get('width') and table_info.get('height'):
-            # Create a clipped PDF that captures only the table and summary below it
-            await self.page.pdf(
-                path=filepath,
+            screenshot_bytes = await self.page.screenshot(
                 clip={
                     'x': max(0, table_info['x']),
                     'y': max(0, table_info['y']),
                     'width': table_info['width'],
                     'height': table_info['height'],
                 },
-                format='A4',
-                margin={'top': 0, 'right': 0, 'bottom': 0, 'left': 0},
+                type='png',
             )
+            image = Image.open(io.BytesIO(screenshot_bytes)).convert('RGB')
+            image.save(filepath, 'PDF', resolution=150.0)
         else:
             # Fallback: Full page PDF
             await self.page.pdf(

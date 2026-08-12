@@ -17,7 +17,7 @@ class AdvancedTablePDFExporter:
 
         options = options or {}
         self.config = {
-            'baseUrl': options.get('baseUrl', 'https://heritage2.itqan-consultant.com/Web/App/Home/Request/37528/1'),
+            'baseUrl': options.get('baseUrl', 'https://heritage2.itqan-consultant.com/Web/App/Home/Login'),
             'searchUrl': options.get('searchUrl', 'https://heritage2.itqan-consultant.com/Web/App/Pools/DataView'),
             'outputDir': options.get('outputDir', './exports'),
             'headless': options.get('headless', True),

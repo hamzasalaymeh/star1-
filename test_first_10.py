@@ -45,12 +45,11 @@ async def main():
 
         for i, link in enumerate(form_links, 1):
             try:
-                print(f'\n[{i}/{len(form_links)}] فتح: {link}')
+                # رابط تبويب "معايير التصنيف" مباشرة: DataEdit/{id}/10
+                classification_link = link.rstrip('/') + '/10'
+                print(f'\n[{i}/{len(form_links)}] فتح: {classification_link}')
 
-                await exporter.page.goto(link, wait_until=exporter.config['waitForNavigation'])
-
-                # الانتقال إلى معايير التصنيف
-                await exporter.navigate_to_classification_criteria()
+                await exporter.page.goto(classification_link, wait_until=exporter.config['waitForNavigation'])
 
                 # استخراج الجدول
                 table_info = await exporter.extract_red_box_table()

@@ -90,6 +90,9 @@ class AdvancedTablePDFExporter:
         await self.page.goto(self.config['searchUrl'],
                             wait_until=self.config['waitForNavigation'])
 
+        # Wait for the search form to actually render before interacting with it
+        await self.page.wait_for_selector('input[name="ctl12$ctl28"]', timeout=15000)
+
         print('✅ تم الوصول إلى صفحة البحث')
 
     async def select_decision_number(self, decision_number: str):
@@ -173,6 +176,104 @@ class AdvancedTablePDFExporter:
 
         print(f'✅ تم جمع {len(links)} رابط استمارة')
         return links
+
+    async def get_current_page_form_links(self) -> list:
+        """Extract unique DataEdit links from the current results grid page only"""
+        links = await self.page.evaluate("""
+            () => {
+                const grid = document.querySelector('#ctl12_GridView1');
+                if (!grid) return [];
+                const anchors = grid.querySelectorAll('a[href*="DataEdit/"]');
+                const seen = new Set();
+                const result = [];
+                anchors.forEach(a => {
+                    if (!seen.has(a.href)) {
+                        seen.add(a.href);
+                        result.push(a.href);
+                    }
+                });
+                return result;
+            }
+        """)
+        return links
+
+    async def goto_next_grid_page(self) -> bool:
+        """
+        Click the next page number in the results grid pager.
+        This is an ASP.NET UpdatePanel AJAX postback (__doPostBack), so the URL
+        does not change - only the grid content updates in place.
+        Returns False if there is no next page (already on the last page).
+        """
+        moved = await self.page.evaluate("""
+            () => {
+                const pagerRow = document.querySelector('#ctl12_GridView1 tr.Pagger');
+                if (!pagerRow) return false;
+
+                let currentPage = null;
+                pagerRow.querySelectorAll('td').forEach(td => {
+                    const span = td.querySelector('span');
+                    if (span) currentPage = parseInt(span.textContent.trim(), 10);
+                });
+                if (currentPage === null) return false;
+
+                const links = Array.from(pagerRow.querySelectorAll('a'));
+                const target = String(currentPage + 1);
+                let nextLink = links.find(a => a.textContent.trim() === target);
+
+                // Fallback: "..." link at the end jumps to the next block of pages
+                if (!nextLink && links.length > 0) {
+                    const last = links[links.length - 1];
+                    if (last.textContent.trim() === '...') {
+                        nextLink = last;
+                    }
+                }
+
+                if (!nextLink) return false;
+                nextLink.click();
+                return true;
+            }
+        """)
+
+        if moved:
+            await asyncio.sleep(2)  # allow the AJAX postback to refresh the grid
+
+        return moved
+
+    async def collect_all_form_links(self, max_pages: int = None) -> list:
+        """
+        Crawl every page of the current search results (via AJAX pagination)
+        and collect all unique DataEdit form links, without opening any of them.
+        This lets the caller iterate forms directly afterwards (page.goto per
+        link) instead of re-running the search for every single form.
+        """
+        print('📑 جارٍ جمع كل روابط الاستمارات من كل صفحات النتائج...')
+
+        all_links = []
+        seen = set()
+        page_num = 1
+
+        while True:
+            page_links = await self.get_current_page_form_links()
+            new_count = 0
+            for link in page_links:
+                if link not in seen:
+                    seen.add(link)
+                    all_links.append(link)
+                    new_count += 1
+
+            print(f'   صفحة {page_num}: {new_count} رابط جديد (الإجمالي: {len(all_links)})')
+
+            if max_pages and page_num >= max_pages:
+                break
+
+            moved = await self.goto_next_grid_page()
+            if not moved:
+                break
+
+            page_num += 1
+
+        print(f'✅ تم جمع {len(all_links)} رابط استمارة من {page_num} صفحة نتائج')
+        return all_links
 
     async def navigate_to_classification_criteria(self):
         """Navigate to classification criteria tab"""

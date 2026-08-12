@@ -24,16 +24,19 @@ async function main() {
   const username = await question('👤 اسم المستخدم: ');
   const password = await question('🔑 كلمة المرور: ');
 
-  // Get decision names
-  console.log('\n📋 أدخل أسماء القرارات المراد تصديرها (واحد في السطر)');
+  // Get decision registration numbers
+  console.log('\n📋 أدخل أرقام قرارات التسجيل (واحد في السطر)');
   console.log('   (اضغط Enter مرتين للانتهاء)\n');
 
   const decisions = [];
-  let decisionName = await question('اسم القرار #1: ');
+  let decisionNumber = await question('رقم قرار التسجيل #1: ');
 
-  while (decisionName.trim()) {
-    decisions.push({ name: decisionName.trim() });
-    decisionName = await question(`اسم القرار #${decisions.length + 1}: `);
+  while (decisionNumber.trim()) {
+    decisions.push({
+      decisionNumber: decisionNumber.trim(),
+      name: `قرار_${decisionNumber.trim()}`
+    });
+    decisionNumber = await question(`رقم قرار التسجيل #${decisions.length + 1}: `);
   }
 
   if (decisions.length === 0) {
@@ -72,17 +75,21 @@ async function main() {
 
     results.forEach((r, i) => {
       if (r.status === 'success') {
-        console.log(`✅ [${i + 1}] ${r.name}`);
+        console.log(`✅ [${i + 1}] القرار ${r.decisionNumber}`);
         console.log(`   📄 PDF: ${r.pdfPath}`);
         console.log(`   📸 لقطة: ${r.pngPath}\n`);
       } else {
-        console.log(`❌ [${i + 1}] ${r.name}`);
+        console.log(`❌ [${i + 1}] القرار ${r.decisionNumber}`);
         console.log(`   الخطأ: ${r.error}\n`);
       }
     });
 
     const successCount = results.filter(r => r.status === 'success').length;
     console.log(`📊 النتيجة النهائية: ${successCount}/${results.length}`);
+
+    if (successCount === results.length) {
+      console.log('🎉 تم تصدير جميع القرارات بنجاح!');
+    }
 
     if (successCount === results.length) {
       console.log('🎉 تم التصدير بنجاح!');

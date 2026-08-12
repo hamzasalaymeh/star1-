@@ -74,6 +74,139 @@ class AdvancedTablePDFExporter {
     console.log('✅ تم تسجيل الدخول');
   }
 
+  async selectDecisionNumber(decisionNumber) {
+    console.log(`📋 جارٍ إدخال رقم قرار التسجيل: ${decisionNumber}`);
+
+    try {
+      // Find and fill the decision number input
+      await this.page.evaluate((number) => {
+        const inputs = document.querySelectorAll('input');
+
+        // Look for the decision number input (first red-bordered input or the one with highest z-index)
+        let targetInput = null;
+
+        for (const input of inputs) {
+          const style = window.getComputedStyle(input);
+          if (style.borderColor === 'rgb(255, 0, 0)' || input.style.borderColor?.includes('red')) {
+            targetInput = input;
+            break;
+          }
+        }
+
+        // Fallback: look by placeholder or name
+        if (!targetInput) {
+          targetInput = Array.from(inputs).find(i =>
+            i.placeholder?.includes('قرار') ||
+            i.placeholder?.includes('رقم') ||
+            i.name?.includes('decision') ||
+            i.name?.includes('number')
+          );
+        }
+
+        // Fallback: try the first visible input in the filter section
+        if (!targetInput && inputs.length > 0) {
+          targetInput = inputs[0];
+        }
+
+        if (targetInput) {
+          targetInput.value = number;
+          targetInput.dispatchEvent(new Event('input', { bubbles: true }));
+          targetInput.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+      }, decisionNumber);
+
+      // Wait for results to load
+      await this.page.waitForTimeout(1500);
+      console.log(`✅ تم إدخال رقم القرار: ${decisionNumber}`);
+    } catch (error) {
+      console.error(`⚠️ خطأ في إدخال رقم القرار: ${error.message}`);
+    }
+  }
+
+  async openFirstForm() {
+    console.log('📂 جارٍ فتح الاستمارة الأولى...');
+
+    try {
+      // Find and click the first form link/button
+      const formLink = await this.page.evaluate(() => {
+        // Look for clickable form elements (links, buttons)
+        const clickables = Array.from(document.querySelectorAll('a, button, [role="button"], [class*="link"], [class*="form"]'));
+
+        // Filter to find first form/request link (usually in a table or list)
+        for (const el of clickables) {
+          const text = el.innerText || el.textContent || '';
+          const isVisible = el.offsetParent !== null;
+
+          if (isVisible && (
+            text.includes('طلب') ||
+            text.includes('استمارة') ||
+            text.includes('رقم') ||
+            el.classList.toString().includes('form') ||
+            el.classList.toString().includes('request')
+          )) {
+            return true;
+          }
+        }
+
+        return false;
+      });
+
+      if (formLink) {
+        const firstFormElement = await this.page.$('a, button, [role="button"], [class*="link"], [class*="form"]');
+        if (firstFormElement) {
+          await firstFormElement.click();
+          await this.page.waitForNavigation({ waitUntil: this.config.waitForNavigation });
+          console.log('✅ تم فتح الاستمارة');
+        }
+      }
+    } catch (error) {
+      console.error(`⚠️ خطأ في فتح الاستمارة: ${error.message}`);
+    }
+  }
+
+  async navigateToClassificationCriteria() {
+    console.log('📊 جارٍ الانتقال إلى معايير التصنيف...');
+
+    try {
+      // Look for "معايير التصنيف" or "التصنيف" tab/link
+      const criteriaButton = await this.page.evaluate(() => {
+        const allElements = document.querySelectorAll('a, button, div, span, li');
+
+        for (const el of allElements) {
+          const text = el.innerText || el.textContent || '';
+          if (text.includes('التصنيف') || text.includes('معايير')) {
+            const isClickable = el.onclick || el.href || el.getAttribute('data-toggle') || el.classList.toString().includes('tab');
+            if (isClickable) {
+              return true;
+            }
+          }
+        }
+
+        return false;
+      });
+
+      if (criteriaButton) {
+        // Find and click the criteria button
+        const buttons = await this.page.$$('a, button, li');
+
+        for (const btn of buttons) {
+          const text = await this.page.evaluate(el => el.innerText || el.textContent, btn);
+
+          if (text.includes('التصنيف') || text.includes('معايير')) {
+            await btn.click();
+            await this.page.waitForTimeout(1500);
+            console.log('✅ تم الانتقال إلى معايير التصنيف');
+            return;
+          }
+        }
+      }
+
+      console.log('⚠️ لم يتم العثور على زر معايير التصنيف');
+    } catch (error) {
+      console.error(`⚠️ خطأ في الانتقال: ${error.message}`);
+    }
+  }
+
   async extractRedBoxTable() {
     console.log('🔍 جارٍ البحث عن الجدول المحدد بمربع أحمر...');
 
@@ -206,12 +339,26 @@ class AdvancedTablePDFExporter {
 
         await this.page.waitForTimeout(800);
 
+        // Select decision number if provided
+        if (decision.decisionNumber) {
+          await this.selectDecisionNumber(decision.decisionNumber);
+          await this.page.waitForTimeout(2000); // Wait for forms to load
+        }
+
         // Navigate if needed
         if (decision.url) {
           await this.page.goto(decision.url, {
             waitUntil: this.config.waitForNavigation,
           });
         }
+
+        // Open first form if not already navigated
+        if (!decision.url) {
+          await this.openFirstForm();
+        }
+
+        // Navigate to classification criteria
+        await this.navigateToClassificationCriteria();
 
         // Extract table info
         const redBoxInfo = await this.extractRedBoxTable();
@@ -226,6 +373,7 @@ class AdvancedTablePDFExporter {
 
         results.push({
           name: decision.name,
+          decisionNumber: decision.decisionNumber,
           status: 'success',
           pdfPath,
           pngPath,
@@ -235,6 +383,7 @@ class AdvancedTablePDFExporter {
         console.error(`❌ خطأ: ${error.message}`);
         results.push({
           name: decision.name,
+          decisionNumber: decision.decisionNumber,
           status: 'failed',
           error: error.message,
         });

@@ -151,6 +151,89 @@ class DebugExporter {
     }
   }
 
+  async selectDecisionNumber(decisionNumber) {
+    this.log('📋', `جارٍ إدخال رقم قرار التسجيل: ${decisionNumber}`);
+
+    try {
+      await this.page.evaluate((number) => {
+        const inputs = document.querySelectorAll('input');
+        let targetInput = null;
+
+        for (const input of inputs) {
+          const style = window.getComputedStyle(input);
+          if (style.borderColor === 'rgb(255, 0, 0)' || input.style.borderColor?.includes('red')) {
+            targetInput = input;
+            break;
+          }
+        }
+
+        if (!targetInput) {
+          targetInput = Array.from(inputs).find(i =>
+            i.placeholder?.includes('قرار') || i.placeholder?.includes('رقم')
+          );
+        }
+
+        if (targetInput) {
+          targetInput.value = number;
+          targetInput.dispatchEvent(new Event('input', { bubbles: true }));
+          targetInput.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+      }, decisionNumber);
+
+      await this.page.waitForTimeout(1500);
+      await this.page.screenshot({
+        path: `${this.config.outputDir}/04-after-decision-number.png`,
+      });
+      this.log('✅', `تم إدخال رقم القرار: ${decisionNumber}`);
+    } catch (error) {
+      this.log('❌', `خطأ في إدخال رقم القرار: ${error.message}`);
+    }
+  }
+
+  async openFirstForm() {
+    this.log('📂', 'جارٍ فتح الاستمارة الأولى...');
+
+    try {
+      const firstFormElement = await this.page.$('a, button, [role="button"]');
+      if (firstFormElement) {
+        await firstFormElement.click();
+        await this.page.waitForNavigation({ waitUntil: 'networkidle2' });
+        await this.page.screenshot({
+          path: `${this.config.outputDir}/05-form-opened.png`,
+        });
+        this.log('✅', 'تم فتح الاستمارة');
+      }
+    } catch (error) {
+      this.log('❌', `خطأ في فتح الاستمارة: ${error.message}`);
+    }
+  }
+
+  async navigateToClassificationCriteria() {
+    this.log('📊', 'جارٍ الانتقال إلى معايير التصنيف...');
+
+    try {
+      const buttons = await this.page.$$('a, button, li');
+
+      for (const btn of buttons) {
+        const text = await this.page.evaluate(el => el.innerText || el.textContent, btn);
+
+        if (text.includes('التصنيف') || text.includes('معايير')) {
+          await btn.click();
+          await this.page.waitForTimeout(1500);
+          await this.page.screenshot({
+            path: `${this.config.outputDir}/06-classification-criteria.png`,
+          });
+          this.log('✅', 'تم الانتقال إلى معايير التصنيف');
+          return;
+        }
+      }
+
+      this.log('⚠️', 'لم يتم العثور على معايير التصنيف');
+    } catch (error) {
+      this.log('❌', `خطأ في الانتقال: ${error.message}`);
+    }
+  }
+
   async inspectPageStructure() {
     this.log('🔍', 'جارٍ فحص بنية الصفحة...');
 
@@ -261,13 +344,19 @@ class DebugExporter {
     }
   }
 
-  async run() {
+  async run(decisionNumber) {
     try {
       await this.init();
       await this.login();
 
       // Wait a bit for page to fully load
       await this.page.waitForTimeout(2000);
+
+      if (decisionNumber) {
+        await this.selectDecisionNumber(decisionNumber);
+        await this.openFirstForm();
+        await this.navigateToClassificationCriteria();
+      }
 
       await this.inspectPageStructure();
       await this.findRedBoxTable();
@@ -290,16 +379,18 @@ async function main() {
   const args = process.argv.slice(2);
   const username = args[0];
   const password = args[1];
+  const decisionNumber = args[2]; // اختياري
 
   if (!username || !password) {
-    console.log('استخدام: node debug-exporter.js <username> <password>');
+    console.log('استخدام: node debug-exporter.js <username> <password> [decisionNumber]');
+    console.log('مثال: node debug-exporter.js admin pass123 21');
     process.exit(1);
   }
 
   const debugger = new DebugExporter(username, password);
 
   try {
-    await debugger.run();
+    await debugger.run(decisionNumber);
   } catch (error) {
     console.error('❌ فشل التصحيح:', error.message);
     process.exit(1);

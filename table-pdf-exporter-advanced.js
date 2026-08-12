@@ -78,48 +78,50 @@ class AdvancedTablePDFExporter {
     console.log(`📋 جارٍ إدخال رقم قرار التسجيل: ${decisionNumber}`);
 
     try {
-      // Find and fill the decision number input
-      await this.page.evaluate((number) => {
-        const inputs = document.querySelectorAll('input');
+      // استخدام الـ selector الفعلي من الـ HTML
+      const input = await this.page.$('input[name="ctl12$ctl28"]');
 
-        // Look for the decision number input (first red-bordered input or the one with highest z-index)
-        let targetInput = null;
+      if (input) {
+        await input.click();
+        await this.page.keyboard.press('Control+A');
+        await this.page.keyboard.type(decisionNumber.toString());
 
-        for (const input of inputs) {
-          const style = window.getComputedStyle(input);
-          if (style.borderColor === 'rgb(255, 0, 0)' || input.style.borderColor?.includes('red')) {
-            targetInput = input;
-            break;
+        // Trigger change event
+        await this.page.evaluate(() => {
+          const input = document.querySelector('input[name="ctl12$ctl28"]');
+          if (input) {
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            input.dispatchEvent(new Event('change', { bubbles: true }));
           }
-        }
+        });
 
-        // Fallback: look by placeholder or name
-        if (!targetInput) {
-          targetInput = Array.from(inputs).find(i =>
-            i.placeholder?.includes('قرار') ||
-            i.placeholder?.includes('رقم') ||
-            i.name?.includes('decision') ||
-            i.name?.includes('number')
-          );
-        }
+        console.log(`✅ تم إدخال رقم القرار: ${decisionNumber}`);
+      } else {
+        console.error('❌ لم يتم العثور على حقل رقم القرار');
+      }
 
-        // Fallback: try the first visible input in the filter section
-        if (!targetInput && inputs.length > 0) {
-          targetInput = inputs[0];
-        }
-
-        if (targetInput) {
-          targetInput.value = number;
-          targetInput.dispatchEvent(new Event('input', { bubbles: true }));
-          targetInput.dispatchEvent(new Event('change', { bubbles: true }));
-        }
-      }, decisionNumber);
-
-      // Wait for results to load
+      // انتظر قليلاً للبحث
       await this.page.waitForTimeout(1500);
-      console.log(`✅ تم إدخال رقم القرار: ${decisionNumber}`);
     } catch (error) {
       console.error(`⚠️ خطأ في إدخال رقم القرار: ${error.message}`);
+    }
+  }
+
+  async clickSearchButton() {
+    console.log('🔍 جارٍ الضغط على زر البحث...');
+
+    try {
+      const searchBtn = await this.page.$('#ctl12_btnSearch');
+      if (searchBtn) {
+        await searchBtn.click();
+        // انتظر تحديث الجدول
+        await this.page.waitForTimeout(2000);
+        console.log('✅ تم الضغط على البحث');
+      } else {
+        console.error('❌ لم يتم العثور على زر البحث');
+      }
+    } catch (error) {
+      console.error(`⚠️ خطأ في الضغط على البحث: ${error.message}`);
     }
   }
 
@@ -127,37 +129,21 @@ class AdvancedTablePDFExporter {
     console.log('📂 جارٍ فتح الاستمارة الأولى...');
 
     try {
-      // Find and click the first form link/button
-      const formLink = await this.page.evaluate(() => {
-        // Look for clickable form elements (links, buttons)
-        const clickables = Array.from(document.querySelectorAll('a, button, [role="button"], [class*="link"], [class*="form"]'));
+      // البحث عن أول رابط استمارة في الجدول (DataEdit/xxx)
+      const firstFormLink = await this.page.$('a[href*="DataEdit/"]');
 
-        // Filter to find first form/request link (usually in a table or list)
-        for (const el of clickables) {
-          const text = el.innerText || el.textContent || '';
-          const isVisible = el.offsetParent !== null;
+      if (firstFormLink) {
+        const href = await this.page.evaluate(el => el.getAttribute('href'), firstFormLink);
+        console.log(`   الرابط: ${href}`);
 
-          if (isVisible && (
-            text.includes('طلب') ||
-            text.includes('استمارة') ||
-            text.includes('رقم') ||
-            el.classList.toString().includes('form') ||
-            el.classList.toString().includes('request')
-          )) {
-            return true;
-          }
-        }
+        // ضغط على الرابط
+        await firstFormLink.click();
 
-        return false;
-      });
-
-      if (formLink) {
-        const firstFormElement = await this.page.$('a, button, [role="button"], [class*="link"], [class*="form"]');
-        if (firstFormElement) {
-          await firstFormElement.click();
-          await this.page.waitForNavigation({ waitUntil: this.config.waitForNavigation });
-          console.log('✅ تم فتح الاستمارة');
-        }
+        // انتظر تحميل الصفحة الجديدة
+        await this.page.waitForNavigation({ waitUntil: this.config.waitForNavigation });
+        console.log('✅ تم فتح الاستمارة');
+      } else {
+        console.error('❌ لم يتم العثور على استمارة في الجدول');
       }
     } catch (error) {
       console.error(`⚠️ خطأ في فتح الاستمارة: ${error.message}`);
@@ -342,7 +328,8 @@ class AdvancedTablePDFExporter {
         // Select decision number if provided
         if (decision.decisionNumber) {
           await this.selectDecisionNumber(decision.decisionNumber);
-          await this.page.waitForTimeout(2000); // Wait for forms to load
+          await this.clickSearchButton(); // اضغط على زر البحث
+          await this.page.waitForTimeout(2000); // انتظر تحديث الجدول
         }
 
         // Navigate if needed

@@ -193,87 +193,140 @@ class AdvancedTablePDFExporter {
     }
   }
 
-  async extractRedBoxTable() {
-    console.log('🔍 جارٍ البحث عن الجدول المحدد بمربع أحمر...');
+  async getSiteName() {
+    console.log('📍 جارٍ استخراج اسم الموقع...');
 
-    // Get red-boxed element coordinates
-    const redBoxInfo = await this.page.evaluate(() => {
-      // Find element with red border
-      let redBoxElement = null;
-
-      // Try multiple selectors
+    const siteName = await this.page.evaluate(() => {
+      // Try to find site name from the page
       const selectors = [
-        'div[style*="border: 2px solid red"]',
-        'div[style*="border-color: red"]',
-        '.red-box',
-        '[class*="red"]',
-        'table',
+        'h1', // Usually the main heading
+        '[class*="title"]',
+        '[class*="name"]',
+        'span[id*="LabelSiteName"]',
+        'label[id*="LabelSiteName"]',
       ];
 
       for (const selector of selectors) {
         const el = document.querySelector(selector);
         if (el) {
-          const style = window.getComputedStyle(el);
-          if (style.borderColor.includes('red') || style.borderColor === 'rgb(255, 0, 0)') {
-            redBoxElement = el;
-            break;
+          const text = (el.innerText || el.textContent || '').trim();
+          if (text && text.length > 0 && text.length < 200) {
+            return text;
           }
         }
       }
 
-      if (!redBoxElement) {
-        redBoxElement = document.querySelector('table') || document.querySelector('[role="table"]');
+      // Fallback: Try to get from any element with Arabic text
+      const allElements = document.querySelectorAll('*');
+      for (const el of allElements) {
+        const text = (el.innerText || el.textContent || '').trim();
+        if (text && /[؀-ۿ]/.test(text) && text.length > 5 && text.length < 100) {
+          return text;
+        }
       }
 
-      if (redBoxElement) {
-        const rect = redBoxElement.getBoundingClientRect();
+      return `موقع_${Date.now()}`;
+    });
+
+    // Clean the site name for use as filename
+    const cleanName = siteName
+      .replace(/[\/\\:*?"<>|]/g, '_') // Remove invalid filename characters
+      .replace(/\s+/g, '_') // Replace spaces with underscores
+      .substring(0, 100); // Limit length
+
+    console.log(`   اسم الموقع: ${siteName}`);
+    return cleanName;
+  }
+
+  async extractRedBoxTable() {
+    console.log('🔍 جارٍ البحث عن جدول معايير التصنيف...');
+
+    // Get the classification criteria table (the one with the red box in the summary)
+    const tableInfo = await this.page.evaluate(() => {
+      // First, try to find the classification criteria table
+      let tableElement = document.querySelector('#ctl12_TemplateRate_GridView1');
+
+      // If not found, search for any table with specific class
+      if (!tableElement) {
+        tableElement = document.querySelector('table.GridView, table[class*="Grid"]');
+      }
+
+      // Fallback: get the first table on page
+      if (!tableElement) {
+        tableElement = document.querySelector('table');
+      }
+
+      if (tableElement) {
+        const rect = tableElement.getBoundingClientRect();
         const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
         const scrollLeft = window.pageXOffset || document.documentElement.scrollLeft;
 
+        // Also get the element that comes after the table (summary/total row)
+        let nextElement = tableElement.nextElementSibling;
+        let totalHeight = rect.height;
+
+        // Look for summary data below the table
+        while (nextElement && totalHeight < rect.height + 500) {
+          const nextRect = nextElement.getBoundingClientRect();
+          const nextText = (nextElement.innerText || nextElement.textContent || '').trim();
+
+          if (nextRect.height > 0 && nextText && nextText.length > 0) {
+            totalHeight += nextRect.height + 10; // Add padding
+          }
+
+          if (nextElement.tagName === 'TABLE' || nextElement.classList.contains('button') ||
+              nextElement.classList.contains('btn') || nextElement.tagName === 'BUTTON') {
+            break;
+          }
+
+          nextElement = nextElement.nextElementSibling;
+        }
+
         return {
           found: true,
-          x: rect.left + scrollLeft,
-          y: rect.top + scrollTop,
-          width: rect.width,
-          height: rect.height,
-          tagName: redBoxElement.tagName,
-          classes: redBoxElement.className,
+          x: Math.max(0, rect.left + scrollLeft - 5),
+          y: Math.max(0, rect.top + scrollTop - 5),
+          width: rect.width + 10,
+          height: totalHeight + 10,
+          tagName: tableElement.tagName,
+          classes: tableElement.className,
+          id: tableElement.id,
         };
       }
 
       return { found: false };
     });
 
-    if (!redBoxInfo.found) {
-      throw new Error('لم يتم العثور على الجدول');
+    if (!tableInfo.found) {
+      throw new Error('لم يتم العثور على جدول معايير التصنيف');
     }
 
-    console.log(`✅ تم العثور على الجدول: ${redBoxInfo.width}x${redBoxInfo.height}px`);
-    return redBoxInfo;
+    console.log(`✅ تم العثور على الجدول: ${tableInfo.width}x${tableInfo.height}px`);
+    return tableInfo;
   }
 
-  async exportTableAsCleanPDF(filename, redBoxInfo) {
+  async exportTableAsCleanPDF(filename, tableInfo) {
     console.log(`📄 جارٍ تحويل الجدول إلى PDF: ${filename}`);
 
-    // Option 1: Export with precise clipping
-    if (redBoxInfo && redBoxInfo.width && redBoxInfo.height) {
-      const clipPath = `${this.config.outputDir}/${filename.replace('.pdf', '_clip.pdf')}`;
+    // Export with precise clipping of just the table
+    if (tableInfo && tableInfo.width && tableInfo.height) {
+      const filepath = `${this.config.outputDir}/${filename}`;
 
-      // Create a clipped PDF
+      // Create a clipped PDF that captures only the table and summary below it
       await this.page.pdf({
-        path: clipPath,
+        path: filepath,
         clip: {
-          x: Math.max(0, redBoxInfo.x - 10),
-          y: Math.max(0, redBoxInfo.y - 10),
-          width: redBoxInfo.width + 20,
-          height: redBoxInfo.height + 20,
+          x: Math.max(0, tableInfo.x),
+          y: Math.max(0, tableInfo.y),
+          width: tableInfo.width,
+          height: tableInfo.height,
         },
         format: 'A4',
         margin: { top: 0, right: 0, bottom: 0, left: 0 },
       });
 
-      console.log(`✅ تم التصدير: ${clipPath}`);
-      return clipPath;
+      console.log(`✅ تم التصدير: ${filepath}`);
+      return filepath;
     }
 
     // Fallback: Full page PDF
@@ -289,20 +342,20 @@ class AdvancedTablePDFExporter {
     return filepath;
   }
 
-  async captureTableScreenshot(filename, redBoxInfo) {
+  async captureTableScreenshot(filename, tableInfo) {
     console.log(`📸 جارٍ حفظ لقطة شاشة الجدول...`);
 
     const screenshotPath = `${this.config.outputDir}/${filename.replace('.pdf', '.png')}`;
 
-    if (redBoxInfo && redBoxInfo.width && redBoxInfo.height) {
-      // Capture just the red box
+    if (tableInfo && tableInfo.width && tableInfo.height) {
+      // Capture just the table and summary
       await this.page.screenshot({
         path: screenshotPath,
         clip: {
-          x: Math.max(0, redBoxInfo.x - 5),
-          y: Math.max(0, redBoxInfo.y - 5),
-          width: redBoxInfo.width + 10,
-          height: redBoxInfo.height + 10,
+          x: Math.max(0, tableInfo.x),
+          y: Math.max(0, tableInfo.y),
+          width: tableInfo.width,
+          height: tableInfo.height,
         },
       });
     } else {
@@ -348,23 +401,27 @@ class AdvancedTablePDFExporter {
         await this.navigateToClassificationCriteria();
 
         // Extract table info
-        const redBoxInfo = await this.extractRedBoxTable();
+        const tableInfo = await this.extractRedBoxTable();
 
-        // Export as PDF
+        // Get site name from the page
+        const siteName = await this.getSiteName();
+
+        // Export as PDF with site name
         const timestamp = Date.now();
-        const pdfFile = `${decision.name}_${timestamp}.pdf`;
-        const pngFile = `${decision.name}_${timestamp}.png`;
+        const pdfFile = `${siteName}_${timestamp}.pdf`;
+        const pngFile = `${siteName}_${timestamp}.png`;
 
-        const pdfPath = await this.exportTableAsCleanPDF(pdfFile, redBoxInfo);
-        const pngPath = await this.captureTableScreenshot(pngFile, redBoxInfo);
+        const pdfPath = await this.exportTableAsCleanPDF(pdfFile, tableInfo);
+        const pngPath = await this.captureTableScreenshot(pngFile, tableInfo);
 
         results.push({
           name: decision.name,
+          siteName: siteName,
           decisionNumber: decision.decisionNumber,
           status: 'success',
           pdfPath,
           pngPath,
-          tableInfo: redBoxInfo,
+          tableInfo: tableInfo,
         });
       } catch (error) {
         console.error(`❌ خطأ: ${error.message}`);
@@ -467,7 +524,7 @@ async function main() {
 
     results.forEach(r => {
       if (r.status === 'success') {
-        console.log(`✅ ${r.name}: ${r.pdfPath}`);
+        console.log(`✅ ${r.siteName || r.name}: ${r.pdfPath}`);
       } else {
         console.log(`❌ ${r.name}: ${r.error}`);
       }

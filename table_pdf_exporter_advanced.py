@@ -80,30 +80,42 @@ class AdvancedTablePDFExporter:
         await self.page.wait_for_load_state(self.config['waitForNavigation'])
         await asyncio.sleep(1.5)  # allow for a possible AJAX postback / JS redirect
 
-        # Verify login actually succeeded (still on login page = failed)
+        # Verify login actually succeeded (still on login page = failed).
+        # Re-check after another short wait in case this was a multi-step
+        # redirect still settling (avoids a false "failed" on a page that's
+        # mid-navigation to the real destination).
         if '/Login' in self.page.url:
-            # Grab any visible error message on the page for diagnosis
-            error_text = await self.page.evaluate("""
-                () => {
-                    const selectors = [
-                        '[id*="lblError"]', '[id*="lblMsg"]', '[class*="error"]',
-                        '[class*="alert"]', '[class*="danger"]', '[id*="Error"]',
-                    ];
-                    for (const sel of selectors) {
-                        const el = document.querySelector(sel);
-                        if (el) {
-                            const text = (el.innerText || el.textContent || '').trim();
-                            if (text) return text;
+            await self.page.wait_for_load_state(self.config['waitForNavigation'])
+            await asyncio.sleep(2)
+
+        if '/Login' in self.page.url:
+            # Grab any visible error message on the page for diagnosis.
+            # Wrapped in try/except: the page could still be mid-navigation
+            # here, which would otherwise crash this diagnostic step itself.
+            try:
+                error_text = await self.page.evaluate("""
+                    () => {
+                        const selectors = [
+                            '[id*="lblError"]', '[id*="lblMsg"]', '[class*="error"]',
+                            '[class*="alert"]', '[class*="danger"]', '[id*="Error"]',
+                        ];
+                        for (const sel of selectors) {
+                            const el = document.querySelector(sel);
+                            if (el) {
+                                const text = (el.innerText || el.textContent || '').trim();
+                                if (text) return text;
+                            }
                         }
+                        return null;
                     }
-                    return null;
-                }
-            """)
-            await self.page.screenshot(path='login_debug.png', full_page=True)
-            print(f'   الرابط بعد محاولة الدخول: {self.page.url}')
-            if error_text:
-                print(f'   رسالة من الصفحة: {error_text}')
-            print('   تم حفظ لقطة شاشة: login_debug.png')
+                """)
+                await self.page.screenshot(path='login_debug.png', full_page=True)
+                print(f'   الرابط بعد محاولة الدخول: {self.page.url}')
+                if error_text:
+                    print(f'   رسالة من الصفحة: {error_text}')
+                print('   تم حفظ لقطة شاشة: login_debug.png')
+            except Exception:
+                pass  # page was mid-navigation; the exception below still fires
             raise Exception('فشل تسجيل الدخول - تأكد من صحة اسم المستخدم وكلمة المرور')
 
         print('✅ تم تسجيل الدخول')

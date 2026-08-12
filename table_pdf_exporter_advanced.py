@@ -76,9 +76,32 @@ class AdvancedTablePDFExporter:
 
         await submit_button.click()
         await self.page.wait_for_load_state(self.config['waitForNavigation'])
+        await asyncio.sleep(1.5)  # allow for a possible AJAX postback / JS redirect
 
         # Verify login actually succeeded (still on login page = failed)
         if '/Login' in self.page.url:
+            # Grab any visible error message on the page for diagnosis
+            error_text = await self.page.evaluate("""
+                () => {
+                    const selectors = [
+                        '[id*="lblError"]', '[id*="lblMsg"]', '[class*="error"]',
+                        '[class*="alert"]', '[class*="danger"]', '[id*="Error"]',
+                    ];
+                    for (const sel of selectors) {
+                        const el = document.querySelector(sel);
+                        if (el) {
+                            const text = (el.innerText || el.textContent || '').trim();
+                            if (text) return text;
+                        }
+                    }
+                    return null;
+                }
+            """)
+            await self.page.screenshot(path='login_debug.png', full_page=True)
+            print(f'   الرابط بعد محاولة الدخول: {self.page.url}')
+            if error_text:
+                print(f'   رسالة من الصفحة: {error_text}')
+            print('   تم حفظ لقطة شاشة: login_debug.png')
             raise Exception('فشل تسجيل الدخول - تأكد من صحة اسم المستخدم وكلمة المرور')
 
         print('✅ تم تسجيل الدخول')

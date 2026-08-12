@@ -21,7 +21,9 @@ from rich.table import Table
 
 from table_pdf_exporter_advanced import AdvancedTablePDFExporter
 
-console = Console()
+# force_terminal يجبر rich يفعّل الألوان حتى لو ما قدر يكتشف قدرات الطرفية
+# صح (بيصير بـ cmd.exe القديمة أحياناً)
+console = Console(force_terminal=True, color_system="standard")
 
 BANNER = r"""[bold green]
    ██████╗████████╗ █████╗ ██████╗  ██╗

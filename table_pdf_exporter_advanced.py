@@ -17,7 +17,7 @@ class AdvancedTablePDFExporter:
 
         options = options or {}
         self.config = {
-            'baseUrl': options.get('baseUrl', 'https://heritage2.itqan-consultant.com/Web/App/Pools/DataEdit/19112/10'),
+            'baseUrl': options.get('baseUrl', 'https://heritage2.itqan-consultant.com/Web/App/Home/Request/37528/1'),
             'outputDir': options.get('outputDir', './exports'),
             'headless': options.get('headless', True),
             'waitForNavigation': options.get('waitForNavigation', 'networkidle'),
@@ -53,8 +53,8 @@ class AdvancedTablePDFExporter:
                             wait_until=self.config['waitForNavigation'])
 
         # Detect and fill login inputs dynamically
-        await self.page.evaluate(f"""
-            (username, password) => {{
+        await self.page.evaluate("""
+            ({ username, password }) => {
                 const inputs = document.querySelectorAll('input');
                 const usernameInput = Array.from(inputs).find(
                     i => i.type === 'text' || i.name?.includes('user') || i.placeholder?.includes('user')
@@ -65,8 +65,8 @@ class AdvancedTablePDFExporter:
 
                 if (usernameInput) usernameInput.value = username;
                 if (passwordInput) passwordInput.value = password;
-            }}
-        """, self.username, self.password)
+            }
+        """, {'username': self.username, 'password': self.password})
 
         # Submit form
         submit_button = await self.page.query_selector(

@@ -492,16 +492,24 @@ class AdvancedTablePDFExporter:
         # matching those pulled the whole header into the clip.
         box = await self.page.evaluate("""
             () => {
-                const tables = Array.from(document.querySelectorAll('table'));
+                // The real answers grid is rendered by an ASP.NET GridView control
+                // (class="GridView"), unlike the page chrome (top bar, tabs, filter
+                // row) which is built out of plain layout <table> elements.
+                let answersTable = document.querySelector(
+                    '#ctl12_TemplateRate_GridView1, table.GridView, table[class*="Grid"]'
+                );
 
-                // Innermost tables only (no nested table inside), so we match the
-                // real data table and not a layout wrapper containing it
-                const leafTables = tables.filter(t => !t.querySelector('table'));
+                if (!answersTable) {
+                    // Fallback: innermost tables only (no nested table inside),
+                    // matched by their own header text
+                    const leafTables = Array.from(document.querySelectorAll('table'))
+                        .filter(t => !t.querySelector('table'));
+                    answersTable = leafTables.find(t => {
+                        const text = t.innerText || t.textContent || '';
+                        return text.includes('رقم السؤال') || text.includes('الاجابات');
+                    });
+                }
 
-                const answersTable = leafTables.find(t => {
-                    const text = t.innerText || t.textContent || '';
-                    return text.includes('رقم السؤال') || text.includes('الاجابات');
-                });
                 if (!answersTable) return { found: false };
 
                 // Classification card ("التصنيف"), identified by its header text

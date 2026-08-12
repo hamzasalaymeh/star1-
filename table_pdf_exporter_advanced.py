@@ -18,6 +18,7 @@ class AdvancedTablePDFExporter:
         options = options or {}
         self.config = {
             'baseUrl': options.get('baseUrl', 'https://heritage2.itqan-consultant.com/Web/App/Home/Request/37528/1'),
+            'searchUrl': options.get('searchUrl', 'https://heritage2.itqan-consultant.com/Web/App/Pools/DataView'),
             'outputDir': options.get('outputDir', './exports'),
             'headless': options.get('headless', True),
             'waitForNavigation': options.get('waitForNavigation', 'networkidle'),
@@ -78,6 +79,15 @@ class AdvancedTablePDFExporter:
             await self.page.wait_for_load_state(self.config['waitForNavigation'])
 
         print('✅ تم تسجيل الدخول')
+
+    async def goto_search_page(self):
+        """Navigate to the search/listing page (Pools/DataView)"""
+        print('🔎 جارٍ الانتقال إلى صفحة البحث...')
+
+        await self.page.goto(self.config['searchUrl'],
+                            wait_until=self.config['waitForNavigation'])
+
+        print('✅ تم الوصول إلى صفحة البحث')
 
     async def select_decision_number(self, decision_number: str):
         """Select decision number"""
@@ -476,6 +486,7 @@ class AdvancedTablePDFExporter:
         try:
             await self.init()
             await self.login()
+            await self.goto_search_page()
             await self.scroll_table_and_load_data()
 
             results = await self.export_batch(decisions)

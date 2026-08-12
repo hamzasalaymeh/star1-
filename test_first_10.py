@@ -29,6 +29,7 @@ async def main():
     try:
         await exporter.init()
         await exporter.login()
+        await exporter.goto_search_page()
 
         # إدخال رقم القرار والبحث
         await exporter.select_decision_number(decision_number)

@@ -23,6 +23,16 @@ async def main():
         print('🔐 تسجيل الدخول...')
         await page.goto(base_url, wait_until='networkidle')
 
+        try:
+            await page.wait_for_selector('input[name="ctl12$ctl03"]', timeout=15000)
+        except Exception:
+            print(f'❌ لم تظهر حقول تسجيل الدخول خلال 15 ثانية')
+            print(f'   الرابط الحالي: {page.url}')
+            await page.screenshot(path='inspect_login_failed.png', full_page=True)
+            print('   تم حفظ لقطة شاشة: inspect_login_failed.png')
+            await browser.close()
+            return
+
         username_input = await page.query_selector('input[name="ctl12$ctl03"]')
         password_input = await page.query_selector('input[name="ctl12$ctl07"]')
 

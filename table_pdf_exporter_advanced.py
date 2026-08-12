@@ -53,6 +53,9 @@ class AdvancedTablePDFExporter:
         await self.page.goto(self.config['baseUrl'],
                             wait_until=self.config['waitForNavigation'])
 
+        # Wait for the login form to actually render before interacting with it
+        await self.page.wait_for_selector('input[name="ctl12$ctl03"]', timeout=15000)
+
         # Fill username/password using the confirmed selectors
         username_input = await self.page.query_selector('input[name="ctl12$ctl03"]')
         password_input = await self.page.query_selector('input[name="ctl12$ctl07"]')

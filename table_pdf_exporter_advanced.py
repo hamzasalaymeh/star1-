@@ -144,6 +144,23 @@ class AdvancedTablePDFExporter:
         except Exception as e:
             print(f'⚠️ خطأ في فتح الاستمارة: {str(e)}')
 
+    async def get_form_links(self, count: int = None) -> list:
+        """Get form links from the results grid (optionally limited to first `count`)"""
+        print(f'📑 جارٍ جمع روابط الاستمارات{f" (أول {count})" if count else ""}...')
+
+        links = await self.page.evaluate("""
+            () => {
+                const anchors = document.querySelectorAll('a[href*="DataEdit/"]');
+                return Array.from(anchors).map(a => a.href);
+            }
+        """)
+
+        if count:
+            links = links[:count]
+
+        print(f'✅ تم جمع {len(links)} رابط استمارة')
+        return links
+
     async def navigate_to_classification_criteria(self):
         """Navigate to classification criteria tab"""
         print('📊 جارٍ الانتقال إلى معايير التصنيف...')

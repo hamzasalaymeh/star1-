@@ -72,11 +72,13 @@ async def main():
                 # فتح تبويب معايير التصنيف مباشرة - بدون فتح الاستمارة الأساسية أو الرجوع لقائمة البحث
                 await exporter.page.goto(classification_link, wait_until=exporter.config['waitForNavigation'])
 
-                # انتظار تحميل الجدول فعلياً (وليس شاشة "جاري التحميل")
+                # انتظار تحميل بطاقة "التصنيف" بالكامل (نستخدم رقم المجموع بأسفلها
+                # كمؤشر تأكيد لأن الجدول العلوي وبطاقة التصنيف بيرندروا بشكل غير متزامن)
                 try:
-                    await exporter.page.wait_for_selector('#ctl12_TemplateRate_GridView1', timeout=15000)
+                    await exporter.page.wait_for_selector('#ctl12_TemplateRate_lblTotl', timeout=15000)
                 except Exception:
                     pass  # extract_red_box_table() has its own fallback selectors
+                await asyncio.sleep(0.5)  # small buffer for the card's rows to finish laying out
 
                 table_info = await exporter.extract_red_box_table()
                 site_name = await exporter.get_site_name(site_id=site_id)

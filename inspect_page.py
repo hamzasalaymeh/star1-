@@ -23,26 +23,28 @@ async def main():
         print('🔐 تسجيل الدخول...')
         await page.goto(base_url, wait_until='networkidle')
 
-        await page.evaluate("""
-            ({ username, password }) => {
-                const inputs = document.querySelectorAll('input');
-                const usernameInput = Array.from(inputs).find(
-                    i => i.type === 'text' || i.name?.includes('user') || i.placeholder?.includes('user')
-                );
-                const passwordInput = Array.from(inputs).find(
-                    i => i.type === 'password' || i.name?.includes('pass')
-                );
-                if (usernameInput) usernameInput.value = username;
-                if (passwordInput) passwordInput.value = password;
-            }
-        """, {'username': username, 'password': password})
+        username_input = await page.query_selector('input[name="ctl12$ctl03"]')
+        password_input = await page.query_selector('input[name="ctl12$ctl07"]')
+
+        if not username_input or not password_input:
+            print('❌ لم يتم العثور على حقول تسجيل الدخول')
+            await browser.close()
+            return
+
+        await username_input.fill(username)
+        await password_input.fill(password)
 
         submit_button = await page.query_selector(
-            'button[type="submit"], .login-btn, [class*="signin"], [class*="login"]'
+            '#ctl12_btnLogin, input[type="submit"], button[type="submit"]'
         )
         if submit_button:
             await submit_button.click()
             await page.wait_for_load_state('networkidle')
+
+        if '/Login' in page.url:
+            print('❌ فشل تسجيل الدخول - تأكد من صحة اسم المستخدم وكلمة المرور')
+            await browser.close()
+            return
 
         print('✅ تم تسجيل الدخول')
         print(f'🔎 الانتقال إلى: {search_url}')

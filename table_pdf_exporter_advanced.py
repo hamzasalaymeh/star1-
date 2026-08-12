@@ -53,30 +53,30 @@ class AdvancedTablePDFExporter:
         await self.page.goto(self.config['baseUrl'],
                             wait_until=self.config['waitForNavigation'])
 
-        # Detect and fill login inputs dynamically
-        await self.page.evaluate("""
-            ({ username, password }) => {
-                const inputs = document.querySelectorAll('input');
-                const usernameInput = Array.from(inputs).find(
-                    i => i.type === 'text' || i.name?.includes('user') || i.placeholder?.includes('user')
-                );
-                const passwordInput = Array.from(inputs).find(
-                    i => i.type === 'password' || i.name?.includes('pass')
-                );
+        # Fill username/password using the confirmed selectors
+        username_input = await self.page.query_selector('input[name="ctl12$ctl03"]')
+        password_input = await self.page.query_selector('input[name="ctl12$ctl07"]')
 
-                if (usernameInput) usernameInput.value = username;
-                if (passwordInput) passwordInput.value = password;
-            }
-        """, {'username': self.username, 'password': self.password})
+        if not username_input or not password_input:
+            raise Exception('لم يتم العثور على حقول تسجيل الدخول')
 
-        # Submit form
+        await username_input.fill(self.username)
+        await password_input.fill(self.password)
+
+        # Submit form - the login button is an <input type="submit">, not a <button>
         submit_button = await self.page.query_selector(
-            'button[type="submit"], .login-btn, [class*="signin"], [class*="login"]'
+            '#ctl12_btnLogin, input[type="submit"], button[type="submit"]'
         )
 
-        if submit_button:
-            await submit_button.click()
-            await self.page.wait_for_load_state(self.config['waitForNavigation'])
+        if not submit_button:
+            raise Exception('لم يتم العثور على زر تسجيل الدخول')
+
+        await submit_button.click()
+        await self.page.wait_for_load_state(self.config['waitForNavigation'])
+
+        # Verify login actually succeeded (still on login page = failed)
+        if '/Login' in self.page.url:
+            raise Exception('فشل تسجيل الدخول - تأكد من صحة اسم المستخدم وكلمة المرور')
 
         print('✅ تم تسجيل الدخول')
 

@@ -535,6 +535,8 @@ class AdvancedTablePDFExporter:
         filepath = os.path.join(self.config['outputDir'], filename)
 
         if table_info and table_info.get('width') and table_info.get('height'):
+            # full_page=True is required: without it the clip is capped to the
+            # viewport, cutting off anything below the fold (the classification card)
             screenshot_bytes = await self.page.screenshot(
                 clip={
                     'x': max(0, table_info['x']),
@@ -542,6 +544,7 @@ class AdvancedTablePDFExporter:
                     'width': table_info['width'],
                     'height': table_info['height'],
                 },
+                full_page=True,
                 type='png',
             )
             image = Image.open(io.BytesIO(screenshot_bytes)).convert('RGB')
@@ -565,7 +568,9 @@ class AdvancedTablePDFExporter:
         screenshot_path = os.path.join(self.config['outputDir'], filename.replace('.pdf', '.png'))
 
         if table_info and table_info.get('width') and table_info.get('height'):
-            # Capture just the table and summary
+            # Capture just the table and summary.
+            # full_page=True is required: without it the clip is capped to the
+            # viewport, cutting off anything below the fold (the classification card)
             await self.page.screenshot(
                 path=screenshot_path,
                 clip={
@@ -574,6 +579,7 @@ class AdvancedTablePDFExporter:
                     'width': table_info['width'],
                     'height': table_info['height'],
                 },
+                full_page=True,
             )
         else:
             # Full screenshot

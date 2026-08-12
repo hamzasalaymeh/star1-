@@ -401,6 +401,13 @@ class AdvancedTablePDFExporter:
                     !text.includes(LOADING_TEXT) &&
                     !text.includes('...');
 
+                // Confirmed field: the site name input on the main request form
+                const siteInput = document.querySelector('input[name="ctl12$RequestBasics$ctl19"]');
+                if (siteInput && siteInput.value) {
+                    const val = siteInput.value.trim();
+                    if (isUsable(val)) return val;
+                }
+
                 const selectors = [
                     'h1',
                     '[class*="title"]',
@@ -450,58 +457,60 @@ class AdvancedTablePDFExporter:
         return clean_name
 
     async def extract_red_box_table(self) -> dict:
-        """Extract classification criteria table info"""
+        """
+        Extract the bounding box spanning the main answers table down through
+        the "التصنيف" (classification) card below it, so both tables end up
+        in a single clip.
+        """
         print('🔍 جارٍ البحث عن جدول معايير التصنيف...')
 
         table_info = await self.page.evaluate("""
             () => {
-                let tableElement = document.querySelector('#ctl12_TemplateRate_GridView1');
-
-                if (!tableElement) {
-                    tableElement = document.querySelector('table.GridView, table[class*="Grid"]');
+                // Main answers table
+                let mainTable = document.querySelector('#ctl12_TemplateRate_GridView1');
+                if (!mainTable) {
+                    mainTable = document.querySelector('table.GridView, table[class*="Grid"]');
                 }
-
-                if (!tableElement) {
-                    tableElement = document.querySelector('table');
+                if (!mainTable) {
+                    mainTable = document.querySelector('table');
                 }
+                if (!mainTable) return { found: false };
 
-                if (tableElement) {
-                    const rect = tableElement.getBoundingClientRect();
-                    const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
-                    const scrollLeft = window.pageXOffset || document.documentElement.scrollLeft;
-
-                    let nextElement = tableElement.nextElementSibling;
-                    let totalHeight = rect.height;
-
-                    while (nextElement && totalHeight < rect.height + 500) {
-                        const nextRect = nextElement.getBoundingClientRect();
-                        const nextText = (nextElement.innerText || nextElement.textContent || '').trim();
-
-                        if (nextRect.height > 0 && nextText && nextText.length > 0) {
-                            totalHeight += nextRect.height + 10;
-                        }
-
-                        if (nextElement.tagName === 'TABLE' || nextElement.classList.contains('button') ||
-                            nextElement.classList.contains('btn') || nextElement.tagName === 'BUTTON') {
-                            break;
-                        }
-
-                        nextElement = nextElement.nextElementSibling;
+                // Classification card ("التصنيف"), identified by its header text
+                let classificationCard = null;
+                document.querySelectorAll('.card').forEach(card => {
+                    const header = card.querySelector('.card-header');
+                    const headerText = header ? (header.innerText || header.textContent || '') : '';
+                    if (headerText.includes('التصنيف')) {
+                        classificationCard = card;
                     }
+                });
 
-                    return {
-                        found: true,
-                        x: Math.max(0, rect.left + scrollLeft - 5),
-                        y: Math.max(0, rect.top + scrollTop - 5),
-                        width: rect.width + 10,
-                        height: totalHeight + 10,
-                        tagName: tableElement.tagName,
-                        classes: tableElement.className,
-                        id: tableElement.id,
-                    };
+                const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+                const scrollLeft = window.pageXOffset || document.documentElement.scrollLeft;
+
+                const startRect = mainTable.getBoundingClientRect();
+                let top = startRect.top;
+                let left = startRect.left;
+                let right = startRect.right;
+                let bottom = startRect.bottom;
+
+                if (classificationCard) {
+                    const endRect = classificationCard.getBoundingClientRect();
+                    top = Math.min(top, endRect.top);
+                    left = Math.min(left, endRect.left);
+                    right = Math.max(right, endRect.right);
+                    bottom = Math.max(bottom, endRect.bottom);
                 }
 
-                return { found: false };
+                return {
+                    found: true,
+                    x: Math.max(0, left + scrollLeft - 5),
+                    y: Math.max(0, top + scrollTop - 5),
+                    width: (right - left) + 10,
+                    height: (bottom - top) + 10,
+                    hasClassificationCard: !!classificationCard,
+                };
             }
         """)
 

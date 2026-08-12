@@ -4,6 +4,7 @@
 """
 
 import asyncio
+import os
 import sys
 from table_pdf_exporter_advanced import AdvancedTablePDFExporter
 
@@ -64,9 +65,15 @@ async def main():
                 # اسم الموقع
                 site_name = await exporter.get_site_name(site_id=site_id)
 
+                # مجلد خاص بكل موقع يحتوي على الـ PDF والصورة بنفس اسم الموقع
+                site_folder = os.path.join(exporter.config['outputDir'], site_name)
+                os.makedirs(site_folder, exist_ok=True)
+
                 # التصدير
-                pdf_path = await exporter.export_table_as_clean_pdf(f'{site_name}.pdf', table_info)
-                png_path = await exporter.capture_table_screenshot(f'{site_name}.png', table_info)
+                pdf_path = await exporter.export_table_as_clean_pdf(
+                    os.path.join(site_name, f'{site_name}.pdf'), table_info)
+                png_path = await exporter.capture_table_screenshot(
+                    os.path.join(site_name, f'{site_name}.png'), table_info)
 
                 results.append({'name': site_name, 'status': 'success', 'pdfPath': pdf_path})
 

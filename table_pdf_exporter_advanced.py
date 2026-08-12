@@ -225,19 +225,29 @@ class AdvancedTablePDFExporter:
         Click the next page number in the results grid pager.
         This is an ASP.NET UpdatePanel AJAX postback (__doPostBack), so the URL
         does not change - only the grid content updates in place.
-        Returns False if there is no next page (already on the last page).
+
+        Because the click itself always "succeeds" from the DOM's point of view
+        even if the postback silently fails to update anything, we verify the
+        move actually happened by comparing the grid's content before and after
+        instead of trusting the click result alone - this avoids looping forever
+        on a page that never actually changes.
+
+        Returns False if there is no next page, or the grid content never changes.
         """
-        moved = await self.page.evaluate("""
+        before_links = await self.get_current_page_form_links()
+        before_fingerprint = ','.join(before_links[:5])
+
+        click_info = await self.page.evaluate("""
             () => {
                 const pagerRow = document.querySelector('#ctl12_GridView1 tr.Pagger');
-                if (!pagerRow) return false;
+                if (!pagerRow) return { clicked: false, reason: 'no-pager' };
 
                 let currentPage = null;
                 pagerRow.querySelectorAll('td').forEach(td => {
                     const span = td.querySelector('span');
                     if (span) currentPage = parseInt(span.textContent.trim(), 10);
                 });
-                if (currentPage === null) return false;
+                if (currentPage === null) return { clicked: false, reason: 'no-current-page-span' };
 
                 const links = Array.from(pagerRow.querySelectorAll('a'));
                 const target = String(currentPage + 1);
@@ -251,23 +261,38 @@ class AdvancedTablePDFExporter:
                     }
                 }
 
-                if (!nextLink) return false;
+                if (!nextLink) return { clicked: false, reason: 'no-next-link', currentPage };
+
                 nextLink.click();
-                return true;
+                return { clicked: true, currentPage, clickedText: nextLink.textContent.trim() };
             }
         """)
 
-        if moved:
-            await asyncio.sleep(2)  # allow the AJAX postback to refresh the grid
+        if not click_info.get('clicked'):
+            print(f'   ⏹️ لا يوجد صفحة تالية ({click_info.get("reason")})')
+            return False
 
-        return moved
+        # Poll for the grid content to actually change (up to ~8 seconds)
+        for _ in range(8):
+            await asyncio.sleep(1)
+            after_links = await self.get_current_page_form_links()
+            after_fingerprint = ','.join(after_links[:5])
+            if after_fingerprint != before_fingerprint:
+                return True
 
-    async def collect_all_form_links(self, max_pages: int = None) -> list:
+        print(f'   ⚠️ الضغط على "{click_info.get("clickedText")}" ما غيّر محتوى الجدول - توقف')
+        return False
+
+    async def collect_all_form_links(self, max_pages: int = 500) -> list:
         """
         Crawl every page of the current search results (via AJAX pagination)
         and collect all unique DataEdit form links, without opening any of them.
         This lets the caller iterate forms directly afterwards (page.goto per
         link) instead of re-running the search for every single form.
+
+        max_pages is a safety cap to guarantee this always terminates even if
+        pagination detection misbehaves; default 500 comfortably covers the
+        ~120 pages expected for a 3000-form decision.
         """
         print('📑 جارٍ جمع كل روابط الاستمارات من كل صفحات النتائج...')
 
@@ -287,6 +312,7 @@ class AdvancedTablePDFExporter:
             print(f'   صفحة {page_num}: {new_count} رابط جديد (الإجمالي: {len(all_links)})')
 
             if max_pages and page_num >= max_pages:
+                print(f'   ⏹️ تم الوصول للحد الأقصى ({max_pages} صفحة)')
                 break
 
             moved = await self.goto_next_grid_page()

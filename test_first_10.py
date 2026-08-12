@@ -53,15 +53,7 @@ async def main():
 
                 await exporter.page.goto(classification_link, wait_until=exporter.config['waitForNavigation'])
 
-                # انتظار تحميل بطاقة "التصنيف" بالكامل (نستخدم رقم المجموع بأسفلها
-                # كمؤشر تأكيد لأن الجدول العلوي وبطاقة التصنيف بيرندروا بشكل غير متزامن)
-                try:
-                    await exporter.page.wait_for_selector('#ctl12_TemplateRate_lblTotl', timeout=15000)
-                except Exception:
-                    pass  # extract_red_box_table() has its own fallback selectors
-                await asyncio.sleep(0.5)  # small buffer for the card's rows to finish laying out
-
-                # استخراج الجدول
+                # استخراج الجدول - extract_red_box_table() ينتظر بنفسه تحميل الجدول وبطاقة التصنيف
                 table_info = await exporter.extract_red_box_table()
 
                 # اسم الموقع

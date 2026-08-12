@@ -472,64 +472,59 @@ class AdvancedTablePDFExporter:
         """
         Extract the bounding box spanning the main answers table down through
         the "التصنيف" (classification) card below it, so both tables end up
-        in a single clip.
+        in a single clip. Uses Playwright locators (auto-waiting, real layout
+        coordinates) instead of manual getBoundingClientRect() + sleeps.
         """
         print('🔍 جارٍ البحث عن جدول معايير التصنيف...')
 
-        table_info = await self.page.evaluate("""
-            () => {
-                // Main answers table
-                let mainTable = document.querySelector('#ctl12_TemplateRate_GridView1');
-                if (!mainTable) {
-                    mainTable = document.querySelector('table.GridView, table[class*="Grid"]');
-                }
-                if (!mainTable) {
-                    mainTable = document.querySelector('table');
-                }
-                if (!mainTable) return { found: false };
+        main_table = self.page.locator(
+            '#ctl12_TemplateRate_GridView1, table.GridView, table[class*="Grid"], table'
+        ).first
 
-                // Classification card ("التصنيف"), identified by its header text
-                let classificationCard = null;
-                document.querySelectorAll('.card').forEach(card => {
-                    const header = card.querySelector('.card-header');
-                    const headerText = header ? (header.innerText || header.textContent || '') : '';
-                    if (headerText.includes('التصنيف')) {
-                        classificationCard = card;
-                    }
-                });
-
-                const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
-                const scrollLeft = window.pageXOffset || document.documentElement.scrollLeft;
-
-                const startRect = mainTable.getBoundingClientRect();
-                let top = startRect.top;
-                let left = startRect.left;
-                let right = startRect.right;
-                let bottom = startRect.bottom;
-
-                if (classificationCard) {
-                    const endRect = classificationCard.getBoundingClientRect();
-                    top = Math.min(top, endRect.top);
-                    left = Math.min(left, endRect.left);
-                    right = Math.max(right, endRect.right);
-                    bottom = Math.max(bottom, endRect.bottom);
-                }
-
-                return {
-                    found: true,
-                    x: Math.max(0, left + scrollLeft - 5),
-                    y: Math.max(0, top + scrollTop - 5),
-                    width: (right - left) + 10,
-                    height: (bottom - top) + 10,
-                    hasClassificationCard: !!classificationCard,
-                };
-            }
-        """)
-
-        if not table_info.get('found'):
+        try:
+            await main_table.wait_for(state='visible', timeout=15000)
+        except Exception:
             raise Exception('لم يتم العثور على جدول معايير التصنيف')
 
-        print(f"✅ تم العثور على الجدول: {table_info['width']}x{table_info['height']}px")
+        start_box = await main_table.bounding_box()
+        if not start_box:
+            raise Exception('لم يتم العثور على جدول معايير التصنيف')
+
+        top = start_box['y']
+        left = start_box['x']
+        right = start_box['x'] + start_box['width']
+        bottom = start_box['y'] + start_box['height']
+        has_classification_card = False
+
+        # Classification card ("التصنيف") - waits for it to actually render,
+        # including its footer total, before measuring its box
+        classification_total = self.page.locator('#ctl12_TemplateRate_lblTotl').first
+        try:
+            await classification_total.wait_for(state='visible', timeout=15000)
+            classification_card = self.page.locator(
+                '.card:has(.card-header:has-text("التصنيف"))'
+            ).first
+            card_box = await classification_card.bounding_box()
+            if card_box:
+                top = min(top, card_box['y'])
+                left = min(left, card_box['x'])
+                right = max(right, card_box['x'] + card_box['width'])
+                bottom = max(bottom, card_box['y'] + card_box['height'])
+                has_classification_card = True
+        except Exception:
+            print('   ⚠️ لم يتم العثور على بطاقة التصنيف - سيتم تصدير الجدول العلوي فقط')
+
+        table_info = {
+            'found': True,
+            'x': max(0, left - 5),
+            'y': max(0, top - 5),
+            'width': (right - left) + 10,
+            'height': (bottom - top) + 10,
+            'hasClassificationCard': has_classification_card,
+        }
+
+        print(f"✅ تم العثور على الجدول: {table_info['width']:.0f}x{table_info['height']:.0f}px "
+              f"(بطاقة التصنيف: {'نعم' if has_classification_card else 'لا'})")
         return table_info
 
     async def export_table_as_clean_pdf(self, filename: str, table_info: dict) -> str:

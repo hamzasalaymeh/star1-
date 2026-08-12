@@ -477,49 +477,79 @@ class AdvancedTablePDFExporter:
         """
         print('🔍 جارٍ البحث عن جدول معايير التصنيف...')
 
-        main_table = self.page.locator(
-            '#ctl12_TemplateRate_GridView1, table.GridView, table[class*="Grid"], table'
-        ).first
-
+        # Wait for the classification card's total - it only renders once the
+        # whole criteria panel is done, so this gates both measurements below
         try:
-            await main_table.wait_for(state='visible', timeout=15000)
+            await self.page.locator('#ctl12_TemplateRate_lblTotl').first.wait_for(
+                state='visible', timeout=15000)
         except Exception:
+            print('   ⚠️ لم تظهر بطاقة التصنيف خلال المهلة')
+
+        # Measure the answers table and the classification card. The answers
+        # table is identified by its distinctive header text ("رقم السؤال")
+        # rather than "first table on the page" - the page chrome (top bar,
+        # tabs, filters) is itself built out of layout <table> elements, and
+        # matching those pulled the whole header into the clip.
+        box = await self.page.evaluate("""
+            () => {
+                const tables = Array.from(document.querySelectorAll('table'));
+
+                // Innermost tables only (no nested table inside), so we match the
+                // real data table and not a layout wrapper containing it
+                const leafTables = tables.filter(t => !t.querySelector('table'));
+
+                const answersTable = leafTables.find(t => {
+                    const text = t.innerText || t.textContent || '';
+                    return text.includes('رقم السؤال') || text.includes('الاجابات');
+                });
+                if (!answersTable) return { found: false };
+
+                // Classification card ("التصنيف"), identified by its header text
+                let classificationCard = null;
+                document.querySelectorAll('.card').forEach(card => {
+                    const header = card.querySelector('.card-header');
+                    const headerText = header ? (header.innerText || header.textContent || '') : '';
+                    if (headerText.includes('التصنيف')) classificationCard = card;
+                });
+
+                const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+                const scrollLeft = window.pageXOffset || document.documentElement.scrollLeft;
+
+                const r = answersTable.getBoundingClientRect();
+                let top = r.top, left = r.left, right = r.right, bottom = r.bottom;
+
+                if (classificationCard) {
+                    const c = classificationCard.getBoundingClientRect();
+                    top = Math.min(top, c.top);
+                    left = Math.min(left, c.left);
+                    right = Math.max(right, c.right);
+                    bottom = Math.max(bottom, c.bottom);
+                }
+
+                return {
+                    found: true,
+                    x: left + scrollLeft,
+                    y: top + scrollTop,
+                    width: right - left,
+                    height: bottom - top,
+                    hasClassificationCard: !!classificationCard,
+                };
+            }
+        """)
+
+        if not box.get('found'):
             raise Exception('لم يتم العثور على جدول معايير التصنيف')
 
-        start_box = await main_table.bounding_box()
-        if not start_box:
-            raise Exception('لم يتم العثور على جدول معايير التصنيف')
-
-        top = start_box['y']
-        left = start_box['x']
-        right = start_box['x'] + start_box['width']
-        bottom = start_box['y'] + start_box['height']
-        has_classification_card = False
-
-        # Classification card ("التصنيف") - waits for it to actually render,
-        # including its footer total, before measuring its box
-        classification_total = self.page.locator('#ctl12_TemplateRate_lblTotl').first
-        try:
-            await classification_total.wait_for(state='visible', timeout=15000)
-            classification_card = self.page.locator(
-                '.card:has(.card-header:has-text("التصنيف"))'
-            ).first
-            card_box = await classification_card.bounding_box()
-            if card_box:
-                top = min(top, card_box['y'])
-                left = min(left, card_box['x'])
-                right = max(right, card_box['x'] + card_box['width'])
-                bottom = max(bottom, card_box['y'] + card_box['height'])
-                has_classification_card = True
-        except Exception:
+        has_classification_card = box['hasClassificationCard']
+        if not has_classification_card:
             print('   ⚠️ لم يتم العثور على بطاقة التصنيف - سيتم تصدير الجدول العلوي فقط')
 
         table_info = {
             'found': True,
-            'x': max(0, left - 5),
-            'y': max(0, top - 5),
-            'width': (right - left) + 10,
-            'height': (bottom - top) + 10,
+            'x': max(0, box['x'] - 5),
+            'y': max(0, box['y'] - 5),
+            'width': box['width'] + 10,
+            'height': box['height'] + 10,
             'hasClassificationCard': has_classification_card,
         }
 

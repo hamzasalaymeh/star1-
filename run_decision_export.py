@@ -47,8 +47,8 @@ async def main():
         await exporter.click_search_button()
         await asyncio.sleep(2)
 
-        # جمع كل روابط الاستمارات من كل صفحات النتائج مرة وحدة
-        form_links = await exporter.collect_all_form_links()
+        # جمع روابط الاستمارات - لو فيه حد محدد، يوقف التنقل بمجرد جمع عدد كافي
+        form_links = await exporter.collect_all_form_links(min_links=forms_limit)
 
         if forms_limit:
             form_links = form_links[:forms_limit]

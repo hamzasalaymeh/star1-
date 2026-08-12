@@ -283,18 +283,22 @@ class AdvancedTablePDFExporter:
         print(f'   ⚠️ الضغط على "{click_info.get("clickedText")}" ما غيّر محتوى الجدول - توقف')
         return False
 
-    async def collect_all_form_links(self, max_pages: int = 500) -> list:
+    async def collect_all_form_links(self, max_pages: int = 500, min_links: int = None) -> list:
         """
-        Crawl every page of the current search results (via AJAX pagination)
-        and collect all unique DataEdit form links, without opening any of them.
-        This lets the caller iterate forms directly afterwards (page.goto per
-        link) instead of re-running the search for every single form.
+        Crawl the current search results (via AJAX pagination) and collect
+        unique DataEdit form links, without opening any of them. This lets the
+        caller iterate forms directly afterwards (page.goto per link) instead
+        of re-running the search for every single form.
 
         max_pages is a safety cap to guarantee this always terminates even if
         pagination detection misbehaves; default 500 comfortably covers the
         ~120 pages expected for a 3000-form decision.
+
+        min_links, if given, stops crawling as soon as at least that many
+        links have been collected (e.g. testing with 10 forms doesn't need to
+        paginate at all if the first page already has 50).
         """
-        print('📑 جارٍ جمع كل روابط الاستمارات من كل صفحات النتائج...')
+        print('📑 جارٍ جمع روابط الاستمارات من نتائج البحث...')
 
         all_links = []
         seen = set()
@@ -310,6 +314,10 @@ class AdvancedTablePDFExporter:
                     new_count += 1
 
             print(f'   صفحة {page_num}: {new_count} رابط جديد (الإجمالي: {len(all_links)})')
+
+            if min_links and len(all_links) >= min_links:
+                print(f'   ⏹️ تم جمع العدد الكافي ({len(all_links)} >= {min_links})')
+                break
 
             if max_pages and page_num >= max_pages:
                 print(f'   ⏹️ تم الوصول للحد الأقصى ({max_pages} صفحة)')

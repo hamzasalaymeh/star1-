@@ -13,8 +13,13 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "export-pdf": "node table-pdf-exporter-advanced.js"
+  },
   "dependencies": {
     "gsap": "^3.12.5",
-    "three": "^0.164.1"
+    "three": "^0.164.1",
+    "puppeteer": "^21.0.0"
   }
 }

@@ -90,13 +90,16 @@ if not all([x_col, y_col, a_col]):
     sys.exit(1)
 
 images = {}
-for f in sorted(os.listdir(WORK_FOLDER)):
-    if not f.lower().endswith(('.png', '.jpg', '.jpeg')):
-        continue
-    m = re.match(r'^(\d+)', f)
-    if m:
-        num = int(m.group(1))
-        images[num] = os.path.join(WORK_FOLDER, f)
+for root, dirs, files in os.walk(WORK_FOLDER):
+    for f in sorted(files):
+        if not f.lower().endswith(('.png', '.jpg', '.jpeg')):
+            continue
+        m = re.match(r'^(\d+)', f)
+        if m:
+            num = int(m.group(1))
+            full_path = os.path.join(root, f)
+            if num not in images:
+                images[num] = full_path
 
 print(f'🖼️ {len(images)} صورة')
 
@@ -187,11 +190,14 @@ opts.add_argument('--no-sandbox')
 opts.add_argument('--disable-dev-shm-usage')
 
 try:
-    srv = Service(ChromeDriverManager().install())
+    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=opts)
 except:
-    srv = None
-
-driver = webdriver.Chrome(service=srv, options=opts)
+    try:
+        driver = webdriver.Chrome(options=opts)
+    except Exception as e:
+        print(f'❌ خطأ في فتح Chrome: {e}')
+        print('   تأكد من تثبيت Google Chrome على الجهاز')
+        sys.exit(1)
 driver.set_window_size(1280, 1024)
 
 DATA_VIEW_URL = 'https://heritage2.itqan-consultant.com/Web/App/Pools/DataView'

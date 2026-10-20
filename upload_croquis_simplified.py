@@ -94,7 +94,10 @@ for root, dirs, files in os.walk(WORK_FOLDER):
     for f in sorted(files):
         if not f.lower().endswith(('.png', '.jpg', '.jpeg')):
             continue
-        m = re.match(r'^(\d+)', f)
+        # ابحث عن رقم في أي مكان (مثل: الغرة 1_5.png أو 5_الغرة.png)
+        m = re.search(r'_(\d+)', f)  # بحث بعد underscore
+        if not m:
+            m = re.search(r'(\d+)', f)  # بحث عام عن أي رقم
         if m:
             num = int(m.group(1))
             full_path = os.path.join(root, f)

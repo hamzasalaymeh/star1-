@@ -1257,6 +1257,12 @@ def _image_number_candidates(image_path, folder_path, expected_numbers):
     if re.fullmatch(r'\s*0*(\d+)\s*', normalized_stem):
         add(re.fullmatch(r'\s*0*(\d+)\s*', normalized_stem).group(1), 120)
 
+    # الرقم بعد آخر «_» هو رقم المبنى في أسماء مثل «الغرة 1_5» → 5.
+    # أولوية عالية حتى لا يلتبس مع الرقم الموجود في اسم القرية («1»).
+    trailing_underscore = re.search(r'_\s*0*(\d+)\s*$', normalized_stem)
+    if trailing_underscore:
+        add(trailing_underscore.group(1), 118)
+
     explicit_pattern = r'(?:مبن[ىي]|موقع|كروكي|رقم|building|site|sketch)\s*[-_#:]?\s*0*(\d+)'
     for match in re.finditer(explicit_pattern, normalized_stem, re.I):
         add(match.group(1), 115)

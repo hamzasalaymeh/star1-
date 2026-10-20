@@ -1814,7 +1814,22 @@ def _search_once(search_value, village, expected_codes=None,
     for full_attempt in range(1, full_attempts + 1):
         driver.get(DATA_VIEW_URL)
         time.sleep(3)
-        search_field = driver.find_element('xpath', "//input[@name='ctl12$ctl04']")
+        # ننتظر ظهور حقل البحث بدل الفشل الفوري إن تأخّر تحميل الصفحة.
+        search_field = None
+        field_deadline = time.time() + 30
+        while time.time() < field_deadline:
+            found = driver.find_elements('xpath', "//input[@name='ctl12$ctl04']")
+            if found:
+                search_field = found[0]
+                break
+            # لو الجلسة انتهت فجأة نعيد الدخول ثم نعيد فتح الصفحة.
+            if 'Login' in driver.current_url or driver.title == 'Runtime Error':
+                auto_login()
+                driver.get(DATA_VIEW_URL)
+            time.sleep(1)
+        if search_field is None:
+            print('   ⚠️ لم يظهر حقل البحث خلال 30 ثانية — إعادة فتح الصفحة')
+            continue
         print('📍 حقل البحث المختار: الموقع أو كود')
         driver.execute_script("""
             var el = arguments[0]; var val = arguments[1];

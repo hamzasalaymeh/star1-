@@ -1,0 +1,80 @@
+{
+  "platform": "https://heritage2.itqan-consultant.com",
+  "last_verified": "2026-10-22",
+  "note": "Use contains(@name, ...) in XPath, never exact match. QuestionId is the most stable key if ctlNN indices shift.",
+  "urls": {
+    "login": "https://heritage2.itqan-consultant.com",
+    "data_view": "https://heritage2.itqan-consultant.com/Web/App/Pools/DataView",
+    "data_edit": "https://heritage2.itqan-consultant.com/Web/App/Pools/DataEdit/{ID}/2"
+  },
+  "credentials": {
+    "username": "H.qurah",
+    "password": "313146"
+  },
+  "search_page": {
+    "search_input": "ctl12$ctl04",
+    "registration_decision_input": "ctl12$ctl28",
+    "search_button": "ctl12$btnSearch",
+    "region_select": "ctl12$ctl08",
+    "stage_select": "ctl12$ctl32",
+    "results_grid_id": "ctl12_GridView1",
+    "edit_link_pattern": "/DataEdit/{id}/",
+    "building_name_pattern": "مبن[ىي]\\s*رقم\\s*(\\d+)"
+  },
+  "edit_page": {
+    "save_button": "ctl12$btnSave",
+    "building_name_display": "ctl12$RequestBasics$ctl19",
+    "fields": {
+      "longitude_x": {
+        "selector_contains": "ctl37$Field1$ctl03",
+        "question_id": "320",
+        "type": "Text",
+        "example": "42.08571"
+      },
+      "latitude_y": {
+        "selector_contains": "ctl38$Field1$ctl03",
+        "question_id": "321",
+        "type": "Text",
+        "example": "19.264981"
+      },
+      "area": {
+        "selector_contains": "ctl39$Field1$ctl03",
+        "question_id": "316",
+        "type": "Number",
+        "example": "49"
+      },
+      "croquis_image": {
+        "file_input_contains": "ctl40$Field1$ctl27",
+        "filename_display_contains": "ctl40$Field1$ctl28",
+        "delete_link_contains": "ctl40$Field1$ctl31",
+        "question_id": "315",
+        "type": "File"
+      }
+    },
+    "other_file_fields": {
+      "ctl34": { "question_id": "272", "type": "File" },
+      "ctl35": { "question_id": "314", "type": "File" },
+      "ctl36": { "question_id": "317", "type": "File" }
+    },
+    "dynamic_question_structure": {
+      "hidden_question_id": "ctlNN$Field1$hdnQuestionId",
+      "hidden_question_type": "ctlNN$Field1$hdnQuestionType",
+      "text_number_input": "ctlNN$Field1$ctl03",
+      "file_input": "ctlNN$Field1$ctl27",
+      "file_name_display": "ctlNN$Field1$ctl28",
+      "checkbox": "ctlNN$Field1$ctl18$i",
+      "radio": "ctlNN$Field1$ctl23"
+    }
+  },
+  "excel_columns": {
+    "building_code": "coded",
+    "longitude_x": "خط_الطول_X",
+    "latitude_y": "خط_العرض_Y",
+    "area": "المساحة"
+  },
+  "image_naming": {
+    "pattern": "<village name>_<building_number>.png",
+    "rule": "building number is the integer after the LAST underscore",
+    "example": "الغرة 1_5.png -> building 5"
+  }
+}

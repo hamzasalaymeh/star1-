@@ -440,6 +440,25 @@ def remove_floors_clause(text: str) -> str:
     return new if new != text else text
 
 
+def _norm_ar(s: str) -> str:
+    """توحيد بسيط للمقارنة: إزالة التطويل وتوحيد المسافات."""
+    return re.sub(r"\s+", " ", (s or "").replace("ـ", "")).strip()
+
+
+def village_core(village: str) -> str:
+    """يستخرج الاسم الجوهري للقرية: يشيل «قرية» من البداية و«التراثية» من النهاية."""
+    v = _norm_ar(village)
+    v = re.sub(r"^قري[ةه]\s+", "", v)
+    v = re.sub(r"\s+التراثي[ةه]\s*$", "", v)
+    return v.strip()
+
+
+def building_village(name: str) -> str:
+    """يستخرج اسم القرية من اسم المبنى «... في قرية X [التراثية]»."""
+    m = re.search(r"في\s+قري[ةه]\s+(.+?)(?:\s+التراثي[ةه])?\s*$", _norm_ar(name))
+    return m.group(1).strip() if m else ""
+
+
 def build_description(template: str, building_name: str, floors_count: int, governorate: str) -> str:
     text = template.strip()
     text = replace_building_name(text, bracket_building_number(building_name.strip()))
@@ -723,7 +742,7 @@ def select_by_text(driver, name: str, text: str):
     raise ValueError(f"ما لقيت '{target}' بالقائمة {name}")
 
 
-def do_search(driver, region: str, registration_decision: str) -> None:
+def do_search(driver, region: str, registration_decision: str, village: str = "") -> None:
     # نبدأ دائمًا من صفحة بحث نظيفة حتى لا تتأثر نتائج قرار بما قبله (ترقيم صفحات قديم).
     print(">> فتح صفحة بحث نظيفة DataView...")
     driver.get(BASE_VIEW)
@@ -739,9 +758,14 @@ def do_search(driver, region: str, registration_decision: str) -> None:
     Select(step_select).select_by_value(STEP_VALUE)
     wait_postback(driver, step_select)
 
-    print(">> تفريغ حقل القرية/الكود")
     village_input = driver.find_element(By.NAME, "ctl12$ctl04")
     village_input.clear()
+    if village.strip():
+        # البحث باسم القرية في حقل «القرية/الكود» لجلب مبانيها فقط.
+        print(f">> إدخال اسم القرية: {village.strip()}")
+        village_input.send_keys(village.strip())
+    else:
+        print(">> تفريغ حقل القرية/الكود")
 
     if registration_decision.strip():
         print(f">> إدخال رقم القرار: {registration_decision.strip()}")
@@ -1112,7 +1136,9 @@ def safe_process(ctx: Context, code: str, template: str, do_save: bool, retries:
 
 # =================================================================== Checkpoint
 def checkpoint_path(excel_path: Path, decision: object) -> Path:
-    safe = re.sub(r"[^0-9A-Za-z]", "_", str(decision)) or "بدون_قرار"
+    # نحافظ على الأحرف العربية حتى لا تتصادم أسماء القرى (كانت تتحول كلها إلى "____").
+    # القرارات الرقمية تبقى كما هي (25→25) فلا تنكسر نقاط الاستئناف القديمة.
+    safe = re.sub(r'[\\/:*?"<>|\s]+', "_", str(decision)).strip("_") or "بدون_قرار"
     return excel_path.parent / f".checkpoint_قرار_{safe}.json"
 
 
@@ -1136,13 +1162,13 @@ def save_checkpoint(path: Path, data: Dict[str, Dict[str, str]]) -> None:
         LOGGER.warning("تعذّر حفظ checkpoint: %s", exc)
 
 
-def read_done_from_excel(excel_path: Path, decision: object) -> Set[str]:
+def read_done_from_excel(excel_path: Path, decision: object, sheet_name: Optional[str] = None) -> Set[str]:
     done: Set[str] = set()
     if not excel_path.exists():
         return done
     try:
         workbook = openpyxl.load_workbook(excel_path, read_only=True, data_only=True)
-        sheet_name = sheet_name_for(str(decision))
+        sheet_name = sheet_name or sheet_name_for(str(decision))
         if sheet_name not in workbook.sheetnames:
             workbook.close()
             return done
@@ -1163,6 +1189,13 @@ def read_done_from_excel(excel_path: Path, decision: object) -> Set[str]:
 # =================================================================== Excel
 def sheet_name_for(registration_decision: str) -> str:
     name = f"قرار {str(registration_decision).strip() or 'بدون_قرار'}"
+    for char in r"[]:*?/\\":
+        name = name.replace(char, "_")
+    return name[:31]
+
+
+def village_sheet_name(village: str) -> str:
+    name = f"قرية {str(village).strip() or 'بدون_اسم'}"
     for char in r"[]:*?/\\":
         name = name.replace(char, "_")
     return name[:31]
@@ -1228,8 +1261,8 @@ def style_sheet(worksheet) -> None:
         )
 
 
-def upsert_excel_row(path: Path, record: Dict[str, object]) -> bool:
-    sheet_name = sheet_name_for(str(record.get("رقم القرار", "")))
+def upsert_excel_row(path: Path, record: Dict[str, object], sheet_name: Optional[str] = None) -> bool:
+    sheet_name = sheet_name or sheet_name_for(str(record.get("رقم القرار", "")))
     for attempt in range(6):
         try:
             workbook = openpyxl.load_workbook(path) if path.exists() else openpyxl.Workbook()
@@ -1323,7 +1356,8 @@ def write_summary(path: Path, summary: Dict[str, object]) -> bool:
 
 
 # =================================================================== Decision runner
-def run_decision(ctx: Context, decision: object, template: str, grand: Dict[str, int]) -> None:
+def run_decision(ctx: Context, decision: object, template: str, grand: Dict[str, int],
+                 village: Optional[str] = None) -> None:
     args = ctx.args
     ui = ctx.ui
     excel_path = Path(args.excel)
@@ -1331,9 +1365,18 @@ def run_decision(ctx: Context, decision: object, template: str, grand: Dict[str,
     mode = "حفظ فعلي" if do_save else "معاينة"
     run_id = datetime.now().strftime("%Y%m%d-%H%M%S")
     start_time = datetime.now()
-    cp_path = checkpoint_path(excel_path, decision)
+
+    # وضع القرية: نبحث باسم القرية ونكتب في ورقة «قرية X» بدل «قرار N».
+    village = (village or "").strip() or None
+    village_name = village_core(village) if village else None  # الاسم الجوهري (بلا «قرية»/«التراثية»)
+    target_label = f"قرية {village_name}" if village else f"قرار {decision}"
+    sheet_name = village_sheet_name(village_name) if village else sheet_name_for(str(decision))
+    cp_key = f"قرية {village_name}" if village else decision
+    cp_path = checkpoint_path(excel_path, cp_key)
     checkpoint = load_checkpoint(cp_path)
-    done_codes: Set[str] = set(checkpoint.get("done", {}).keys()) | read_done_from_excel(excel_path, decision)
+    done_codes: Set[str] = set(checkpoint.get("done", {}).keys()) | read_done_from_excel(
+        excel_path, decision, sheet_name=sheet_name
+    )
 
     state = {"last_page": 0, "last_index": 0, "last_code": "", "total": 0}
 
@@ -1381,15 +1424,18 @@ def run_decision(ctx: Context, decision: object, template: str, grand: Dict[str,
             },
         )
 
-    ui.set_decision(decision, 0)
-    ui.log(f"بدء قرار {decision} — الوضع: {mode}", "info")
-    log_event("START", f"بدأ التشغيل لقرار {decision}")
+    ui.set_decision(target_label, 0)
+    ui.log(f"بدء {target_label} — الوضع: {mode}", "info")
+    log_event("START", f"بدأ التشغيل لـ {target_label}")
     update_summary("STARTED")
 
     # ----- collection (with crash safety) -----
     collection: Optional[CollectionResult] = None
 
-    only_codes = [str(c).strip() for c in (getattr(args, "only_codes", None) or []) if str(c).strip()]
+    # الأكواد المحددة لا تُستخدم في وضع القرية (البحث فيه باسم القرية).
+    only_codes = [] if village else [
+        str(c).strip() for c in (getattr(args, "only_codes", None) or []) if str(c).strip()
+    ]
     if only_codes:
         # وضع الأكواد المحددة: لا بحث ولا جمع — نعالج الأكواد المطلوبة مباشرةً.
         collection = CollectionResult(
@@ -1401,7 +1447,7 @@ def run_decision(ctx: Context, decision: object, template: str, grand: Dict[str,
         for collect_attempt in range(2):
             try:
                 ctx.ensure_session()
-                do_search(ctx.driver, args.region, str(decision))
+                do_search(ctx.driver, args.region, "" if village else str(decision), village=village_name or "")
 
                 def page_progress(page_number, added, running_total, details):
                     state["last_page"] = page_number
@@ -1432,12 +1478,19 @@ def run_decision(ctx: Context, decision: object, template: str, grand: Dict[str,
         return
 
     buildings = collection.buildings
+    if village:
+        # تصفية دقيقة: نُبقي فقط مباني القرية المطلوبة بالضبط (نفصل المتشابهة مثل
+        # «الماوين» عن «الماوين بللحمر»)، اعتمادًا على اسم القرية داخل اسم المبنى.
+        before = len(buildings)
+        buildings = [(c, n) for c, n in buildings if _norm_ar(building_village(n)) == _norm_ar(village_name)]
+        ui.log(f"تصفية باسم «{village_name}»: {len(buildings)} من {before} مبنى", "info")
+        log_event("FILTER", f"تصفية القرية «{village_name}»: {len(buildings)}/{before}", total_buildings=len(buildings))
     if getattr(args, "limit", 0) and args.limit > 0:
         buildings = buildings[: args.limit]
         ui.log(f"وضع التجربة: سيُعالَج أول {len(buildings)} مبنى فقط (--limit)", "warn")
     state["last_page"] = collection.last_page
     state["total"] = len(buildings)
-    ui.set_decision(decision, len(buildings))
+    ui.set_decision(target_label, len(buildings))
 
     # حماية الدفعة الناقصة تُطبّق فقط عند الحفظ الفعلي؛ المعاينة تكمل دائمًا.
     if collection.stopped_reason and do_save and not args.allow_partial_collection:
@@ -1451,7 +1504,11 @@ def run_decision(ctx: Context, decision: object, template: str, grand: Dict[str,
         return
 
     if not buildings:
-        msg = "لا توجد مبانٍ مطابقة. راجع المنطقة/رقم القرار/الخطوة."
+        if village:
+            msg = (f"لا توجد مبانٍ مطابقة لقرية «{village_name}». تأكد من كتابة اسم القرية "
+                   "(جرّب بدون/مع كلمة «قرية»)، ومن المنطقة والخطوة.")
+        else:
+            msg = "لا توجد مبانٍ مطابقة. راجع المنطقة/رقم القرار/الخطوة."
         ui.log(msg, "warn")
         log_event("END", msg, status="لا نتائج")
         update_summary("NO_RESULTS", msg)
@@ -1493,8 +1550,8 @@ def run_decision(ctx: Context, decision: object, template: str, grand: Dict[str,
                 "اسم المبنى": result.name,
                 "المنطقة": args.region,
                 "المحافظة": result.gov,
-                "القرية (بحث)": "بدون فلترة قرية",
-                "رقم القرار": decision,
+                "القرية (بحث)": village_name if village else "بدون فلترة قرية",
+                "رقم القرار": "" if village else decision,
                 "عدد الأدوار": result.floors,
                 "الحالة": status,
                 "السبب": result.reason,
@@ -1502,6 +1559,7 @@ def run_decision(ctx: Context, decision: object, template: str, grand: Dict[str,
                 "النص السابق": result.old,
                 "وقت المعالجة": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             },
+            sheet_name=sheet_name,
         )
 
         if status == "نجح":
@@ -1517,7 +1575,7 @@ def run_decision(ctx: Context, decision: object, template: str, grand: Dict[str,
     log_event("END", "انتهى التشغيل", result_page=state["last_page"], building_index=state["last_index"],
               total_buildings=len(buildings), code=state["last_code"], status="انتهى")
     update_summary("DONE")
-    ui.log(f"انتهى قرار {decision} ✓", "ok")
+    ui.log(f"انتهى {target_label} ✓", "ok")
 
 
 # =================================================================== Auto run
@@ -1572,10 +1630,18 @@ def run_auto(args: argparse.Namespace) -> int:
         decisions_to_run = args.decisions[:1] or list(DEFAULT_DECISIONS)[:1]
         print(f">> وضع الأكواد المحددة: {len(args.only_codes)} كود | ستُكتب في ورقة «قرار {decisions_to_run[0]}»"
               + (" | مرن (يشمل الآبار والمواقع بلا أدوار)" if getattr(args, "loose", False) else ""))
+    villages = [str(v).strip() for v in (getattr(args, "villages", None) or []) if str(v).strip()]
+    if villages:
+        print(f">> وضع القرى: {len(villages)} قرية ({'، '.join(villages)}) — بحث باسم القرية"
+              + (" | مرن (يشمل الآبار والمواقع بلا أدوار)" if getattr(args, "loose", False) else ""))
     ui.start()
     try:
-        for decision in decisions_to_run:
-            run_decision(ctx, decision, template, grand)
+        if villages:
+            for village in villages:
+                run_decision(ctx, None, template, grand, village=village)
+        else:
+            for decision in decisions_to_run:
+                run_decision(ctx, decision, template, grand)
     except KeyboardInterrupt:
         ui.log("إيقاف يدوي (Ctrl+C) — التقدّم محفوظ، أعد التشغيل للاستئناف.", "warn")
     finally:
@@ -1746,6 +1812,9 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--limit", type=int, default=0, help="معالجة أول N مبنى فقط (0 = الكل) — مفيد للتجربة")
     run.add_argument("--only-codes", nargs="+", default=None, dest="only_codes",
                      help="معالجة هذه الأكواد فقط مباشرةً بدون بحث/جمع لكل المواقع (مثال: --only-codes 40125 40159)")
+    run.add_argument("--villages", nargs="+", default=None,
+                     help="معالجة قرى محددة بالبحث باسمها (مثال: --villages \"قرية الريامة\" \"قرية ال قحطان\")؛ "
+                          "كل قرية تُكتب في ورقة «قرية X»")
     run.add_argument("--loose", action="store_true",
                      help="وضع مرن: يقبل «موقع/ميني رقم N» (آبار/مساجد/حصون) ويكتب الوصف بدون ذكر الأدوار إن لم تكن رقمية")
     run.add_argument("--delay", type=float, default=DELAY_BETWEEN)

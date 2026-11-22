@@ -114,15 +114,17 @@ def python_exe():
 
 
 def launch(cmd, cwd=None, env_extra=None):
-    """يشغّل أمراً في نافذة طرفية جديدة (على ويندوز) ليشوف المستخدم التقدّم."""
+    """يشغّل أمراً في نافذة طرفية جديدة (على ويندوز) ليشوف المستخدم التقدّم.
+    نلفّه بـ (cmd /k) حتى تبقى النافذة مفتوحة بعد انتهاء/تعطّل السكربت، فيظهر
+    أي خطأ بدل ما تختفي النافذة فوراً."""
     env = os.environ.copy()
     if env_extra:
         env.update({k: str(v) for k, v in env_extra.items() if v is not None})
     kwargs = {"cwd": cwd or HERE, "env": env}
     if os.name == "nt":
         kwargs["creationflags"] = 0x00000010  # CREATE_NEW_CONSOLE
-    else:
-        pass  # على لينكس/ماك يظهر الخرج بنفس الطرفية
+        # نافذة تبقى مفتوحة بعد الانتهاء (نقرأ الرسائل/الأخطاء)
+        cmd = "cmd /k " + subprocess.list2cmdline(cmd)
     subprocess.Popen(cmd, **kwargs)
 
 

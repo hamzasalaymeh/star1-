@@ -62,11 +62,17 @@ PASSWORD = os.environ.get("HERITAGE_PASSWORD") or "313146"
 # الطراز المعماري المستهدف (قسم 4) — مُعمّم عبر البيئة.
 TARGET_REGION = os.environ.get("HERITAGE_TARGET_STYLE", "المنطقة الجنوبية")
 
-# مسارات الملفات
-DB_PATH = Path("heritage_automation.db")
-CHECKPOINT_PATH = Path("checkpoint.json")
-EXCEL_OUTPUT = Path("heritage_report.xlsx")
-LOG_FILE = Path("heritage_automation.log")
+# مسارات الملفات — تُحفظ في المجلد الذي يختاره المستخدم (HERITAGE_OUTPUT) أو مجلد التشغيل.
+_OUT = Path(os.environ.get("HERITAGE_OUTPUT") or ".")
+try:
+    _OUT.mkdir(parents=True, exist_ok=True)
+except Exception:
+    _OUT = Path(".")
+DB_PATH = _OUT / "heritage_automation.db"
+CHECKPOINT_PATH = _OUT / "checkpoint.json"
+EXCEL_OUTPUT = _OUT / "heritage_report.xlsx"
+LOG_FILE = _OUT / "heritage_automation.log"
+print(f"📁 مجلد الحفظ: {_OUT.resolve()}")
 
 # إعدادات Selenium
 HEADLESS = True

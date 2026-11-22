@@ -21,9 +21,26 @@ from rich.table import Table
 
 from table_pdf_exporter_advanced import AdvancedTablePDFExporter
 
-# force_terminal يجبر rich يفعّل الألوان حتى لو ما قدر يكتشف قدرات الطرفية
-# صح (بيصير بـ cmd.exe القديمة أحياناً)
-console = Console(force_terminal=True, color_system="standard")
+# جسر مركز التحكم (اختياري): يبعث تقدّماً ويحترم الإيقاف. يتحوّل صامتاً خارج المركز.
+try:
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from agent_runtime import R as _R
+except Exception:
+    class _NoR:
+        enabled = False
+        def total(self, *a, **k): pass
+        def progress(self, *a, **k): pass
+        def log(self, *a, **k): pass
+        def done(self, *a, **k): pass
+        def should_stop(self): return False
+        def wait_if_paused(self): return True
+    _R = _NoR()
+
+# تحت مركز التحكم: مخرجات نصية نظيفة (بدون رموز ألوان) ليظهر السجل سليماً بالشاشة.
+_UNDER_HUB = bool(os.environ.get("HERITAGE_CONTROL"))
+console = Console(force_terminal=not _UNDER_HUB,
+                  color_system=None if _UNDER_HUB else "standard",
+                  no_color=_UNDER_HUB)
 
 BANNER = r"""[bold green]
    ██████╗████████╗ █████╗ ██████╗  ██╗
@@ -115,19 +132,30 @@ async def main():
     decision_number = sys.argv[1]
     forms_limit = int(sys.argv[2]) if len(sys.argv) > 2 and sys.argv[2].isdigit() else None
 
-    username = sys.argv[3] if len(sys.argv) > 3 else console.input('[bold cyan]👤 اسم المستخدم:[/bold cyan] ')
-    password = sys.argv[4] if len(sys.argv) > 4 else console.input('[bold cyan]🔑 كلمة المرور:[/bold cyan] ', password=True)
+    # بيانات الدخول من البيئة (يمرّرها المركز) ثم القيم الافتراضية — لا تتأثر
+    # بوجود/غياب وسيط الحد (كان يسبب خلطاً سابقاً).
+    username = os.environ.get("HERITAGE_USERNAME") or "H.qurah"
+    password = os.environ.get("HERITAGE_PASSWORD") or "313146"
+
+    # مجلد الحفظ: يختاره المستخدم (متغيّر البيئة HERITAGE_OUTPUT) أو الافتراضي.
+    out_base = os.environ.get("HERITAGE_OUTPUT") or "exports"
+    out_dir = os.path.join(out_base, f"قرار_{decision_number}")
 
     exporter = AdvancedTablePDFExporter(
         username,
         password,
         options={
             'headless': True,  # شغّل headless=False فقط لو بدك تراقب المتصفح مباشرة
-            'outputDir': f'./exports/قرار_{decision_number}',
+            'outputDir': out_dir,
         }
     )
 
     results = []
+    skip_n = 0
+    save_dir = os.path.abspath(out_dir)
+    console.print(f'📁 مجلد الحفظ: {save_dir}')
+    _R.log(f"📁 مجلد الحفظ: {save_dir}", "info")
+    _R.log("⏳ جاري تسجيل الدخول وجمع روابط الاستمارات (قد يأخذ دقائق للقرارات الكبيرة)…", "info")
 
     try:
         await exporter.init()
@@ -153,6 +181,8 @@ async def main():
 
         total = len(form_links)
         console.rule(f'[bold cyan]جارٍ تصدير {total} استمارة[/bold cyan]', style="cyan")
+        _R.total(total)
+        _R.log(f"تم جمع {total} استمارة — بدء التصدير", "info")
 
         # ── استئناف ذكي: نتخطّى المواقع المصدّرة سابقاً ونكمل؛ الفاشلة تُعاد تلقائياً ──
         import json as _json
@@ -176,9 +206,18 @@ async def main():
 
         for i, link in enumerate(form_links, 1):
             try:
+                # نقطة آمنة قبل كل استمارة: إيقاف مؤقت / إيقاف آمن من المركز
+                if not _R.wait_if_paused():
+                    _R.log("إيقاف آمن — خروج بعد آخر استمارة مكتملة", "warn")
+                    break
+                if _R.should_stop():
+                    break
                 # رابط تبويب "معايير التصنيف" مباشرة: DataEdit/{id}/10
                 site_id = link.rstrip('/').split('/')[-1]
+                _R.progress(current=site_id)
                 if site_id in _done:
+                    skip_n += 1
+                    _R.progress(skipped=skip_n, current=site_id)
                     console.print(f'[dim]⏭️ [{i}/{total}] {site_id} — مُصدّر سابقاً، تخطّي[/dim]')
                     continue
                 classification_link = link.rstrip('/') + '/10'
@@ -211,10 +250,17 @@ async def main():
                 })
                 _done.add(site_id); _save_ckpt()
                 console.print(f'  [bold green]✔ نجح:[/bold green] {site_name}')
+                _R.progress(done=sum(1 for r in results if r['status'] == 'success'),
+                            failed=sum(1 for r in results if r['status'] == 'failed'),
+                            skipped=skip_n, current=site_name)
 
             except Exception as e:
                 console.print(f'  [bold red]✘ فشل الاستمارة {i}: {e}[/bold red]')
                 results.append({'name': f'استمارة_{i}', 'status': 'failed', 'error': str(e)})
+                _R.log(f"❌ فشل الاستمارة {i}: {str(e)[:60]}", "error")
+                _R.progress(done=sum(1 for r in results if r['status'] == 'success'),
+                            failed=sum(1 for r in results if r['status'] == 'failed'),
+                            skipped=skip_n)
 
         await exporter.close()
 
@@ -236,10 +282,13 @@ async def main():
         # فهرس Excel بروابط نسبية تشتغل من أي جهاز
         excel_path = build_excel_index(exporter.config['outputDir'], decision_number, results)
         console.print(f'[bold cyan]📊 تم إنشاء فهرس Excel:[/bold cyan] {excel_path}')
+        _R.log(f"📊 فهرس Excel: {excel_path}", "ok")
+        _R.done(ok=success_count, failed=len(results) - success_count, skipped=skip_n)
 
     except Exception as e:
         await exporter.close()
         console.print(f'[bold red]❌ خطأ عام: {e}[/bold red]')
+        _R.log(f"❌ خطأ عام: {e}", "error")
 
 
 if __name__ == '__main__':

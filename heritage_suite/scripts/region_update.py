@@ -742,6 +742,12 @@ class HeritageAutomation:
                 reset_count = self.db.reset_failed_to_pending()
                 logger.info(f"🔁 تم إرجاع {reset_count} موقع من 'فشل' إلى 'معلق' لإعادة المحاولة")
             else:
+                # استئناف ذكي: أي موقع 'فشل' سابقاً يُعاد إلى 'معلق' فيُعاد تلقائياً
+                # في هذا التشغيل (مع الاستمرار بجمع المواقع الجديدة أيضاً).
+                retried = self.db.reset_failed_to_pending()
+                if retried:
+                    logger.info(f"🔁 إعادة {retried} موقع فاشل سابقاً للمحاولة تلقائياً")
+
                 # الانتقال إلى دليل المواقع
                 if not self.driver_manager.navigate_to_guide_list():
                     logger.error("❌ فشل الانتقال إلى دليل المواقع")

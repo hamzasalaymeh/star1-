@@ -737,6 +737,31 @@ if driver.title == 'Runtime Error' or 'Login' in driver.current_url:
 grand_total = {'villages': 0, 'processed': 0, 'skipped': 0, 'failed': 0}
 followup_by_village = {}
 
+# ── استئناف ذكي: نحفظ أكواد المباني المكتملة، فلو توقّف وأعدت التشغيل
+#    يتخطّى المكتمل ويكمل من مكانه؛ والمباني الفاشلة (غير محفوظة) تُعاد تلقائياً.
+import json as _json
+CHECKPOINT_FILE = os.path.join(REPORTS_DIR, '.checkpoint_croqui.json')
+
+def _load_done():
+    try:
+        with open(CHECKPOINT_FILE, encoding='utf-8') as _f:
+            return set(_json.load(_f).get('done', []))
+    except Exception:
+        return set()
+
+def _save_done(done_set):
+    try:
+        _tmp = CHECKPOINT_FILE + '.tmp'
+        with open(_tmp, 'w', encoding='utf-8') as _f:
+            _json.dump({'done': sorted(done_set)}, _f, ensure_ascii=False)
+        os.replace(_tmp, CHECKPOINT_FILE)
+    except Exception as _e:
+        print(f'   ⚠️ تعذّر حفظ نقطة الاستئناف: {_e}')
+
+DONE = _load_done()
+if DONE:
+    print(f'📌 استئناف: {len(DONE)} مبنى مكتمل سابقاً — سيُتخطّى ويُكمل من مكانه')
+
 for v_idx, cfg in enumerate(villages_config, start=1):
     village          = cfg['village']
     FOLDER_PATH      = cfg['folder']
@@ -941,13 +966,19 @@ for v_idx, cfg in enumerate(villages_config, start=1):
 
         bid = b['link'].rstrip('/').split('/')[-1]
 
+        if bid in DONE:
+            print('   ⏭️ مُنجز سابقاً — تخطّي (استئناف)')
+            continue
+
         try:
             ok = process_building(bid, excel_key, data_by_building, images_by_building)
             has_img = '+ صورة' if excel_key in images_by_building else '(بدون صورة)'
             log(excel_key, 'success' if ok else 'error',
                 f'تم تحديث X/Y/مساحة {has_img}' if ok else 'فشل التحقق بعد محاولتين')
-            if ok: processed += 1
-            else:  failed += 1
+            if ok:
+                processed += 1; DONE.add(bid); _save_done(DONE)
+            else:
+                failed += 1
         except Exception as e:
             emsg = str(e)
             if ('HTTPConnection' in emsg or 'Max retries' in emsg
@@ -961,8 +992,10 @@ for v_idx, cfg in enumerate(villages_config, start=1):
                         log(excel_key, 'success' if ok else 'error',
                             f'تم تحديث X/Y/مساحة {has_img} (بعد إعادة اتصال)'
                             if ok else 'فشل التحقق بعد محاولتين')
-                        if ok: processed += 1
-                        else:  failed += 1
+                        if ok:
+                            processed += 1; DONE.add(bid); _save_done(DONE)
+                        else:
+                            failed += 1
                         continue
                     except Exception as e2:
                         log(excel_key, 'error', f'فشل حتى بعد إعادة الاتصال: {str(e2)[:40]}')

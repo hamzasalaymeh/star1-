@@ -154,10 +154,33 @@ async def main():
         total = len(form_links)
         console.rule(f'[bold cyan]جارٍ تصدير {total} استمارة[/bold cyan]', style="cyan")
 
+        # ── استئناف ذكي: نتخطّى المواقع المصدّرة سابقاً ونكمل؛ الفاشلة تُعاد تلقائياً ──
+        import json as _json
+        _ckpt = os.path.join(exporter.config['outputDir'], '.checkpoint_pdf_table.json')
+        try:
+            with open(_ckpt, encoding='utf-8') as _f:
+                _done = set(_json.load(_f).get('done', []))
+        except Exception:
+            _done = set()
+        if _done:
+            console.print(f'[cyan]📌 استئناف: {len(_done)} موقع مصدّر سابقاً — سيُتخطّى ويُكمل من مكانه[/cyan]')
+
+        def _save_ckpt():
+            try:
+                _tmp = _ckpt + '.tmp'
+                with open(_tmp, 'w', encoding='utf-8') as _f:
+                    _json.dump({'done': sorted(_done)}, _f, ensure_ascii=False)
+                os.replace(_tmp, _ckpt)
+            except Exception:
+                pass
+
         for i, link in enumerate(form_links, 1):
             try:
                 # رابط تبويب "معايير التصنيف" مباشرة: DataEdit/{id}/10
                 site_id = link.rstrip('/').split('/')[-1]
+                if site_id in _done:
+                    console.print(f'[dim]⏭️ [{i}/{total}] {site_id} — مُصدّر سابقاً، تخطّي[/dim]')
+                    continue
                 classification_link = link.rstrip('/') + '/10'
                 console.print(f'\n[bold]\\[{i}/{total}][/bold] [dim]{classification_link}[/dim]')
 
@@ -186,6 +209,7 @@ async def main():
                     'pngPath': png_path,
                     'relPdfPath': rel_pdf_path,
                 })
+                _done.add(site_id); _save_ckpt()
                 console.print(f'  [bold green]✔ نجح:[/bold green] {site_name}')
 
             except Exception as e:

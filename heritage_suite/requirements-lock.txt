@@ -1,0 +1,13 @@
+# نسخ مثبّتة (lock) — نسخ معروفة شغّالة، لتفادي كسر مفاجئ بعد تحديث مكتبة.
+# للتثبيت المطابق تماماً:  pip install -r requirements-lock.txt
+selenium==4.25.0
+webdriver-manager==4.1.2
+pandas==2.1.3
+openpyxl==3.1.5
+rich==13.9.4
+arabic-reshaper==3.1.0
+python-bidi==0.6.12
+requests==2.34.2
+beautifulsoup4==4.15.0
+tqdm==4.70.1
+playwright==1.62.0

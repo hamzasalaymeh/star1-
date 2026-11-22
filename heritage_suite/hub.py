@@ -13,6 +13,7 @@
 
 import os
 import sys
+import json
 import subprocess
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
@@ -21,6 +22,28 @@ APP_TITLE = "مجمّع أتمتة مشروع التراث العمراني"
 AUTHOR = "ENG. Hamza ALsalaymeh"
 HERE = os.path.dirname(os.path.abspath(__file__))
 SCRIPTS = os.path.join(HERE, "scripts")
+# يتذكّر آخر إعداداتك + ملفات التعريف (Presets). محفوظ بمجلد المستخدم فيبقى
+# حتى لو فكّيت ضغط نسخة جديدة فوق القديمة.
+STATE_FILE = os.path.join(os.path.expanduser("~"), ".heritage_suite_state.json")
+
+
+def load_state():
+    try:
+        with open(STATE_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+            data.setdefault("last", {})
+            data.setdefault("presets", {})
+            return data
+    except Exception:
+        return {"last": {}, "presets": {}}
+
+
+def save_state(state):
+    try:
+        with open(STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump(state, f, ensure_ascii=False, indent=1)
+    except Exception:
+        pass
 
 # مناطق المملكة (أسماء كما تظهر بقائمة المنطقة في المنصة).
 REGIONS = [
@@ -116,6 +139,17 @@ TASKS = [
         ],
         "pass_creds_positional": True,  # pdf_export يأخذ user/pass كوسيطين 3و4
     },
+    {
+        "id": "failed_tracker",
+        "title": "🧹 متابعة الفاشلين",
+        "desc": "يمسح مجلد التقارير ويجمع كل المواقع الفاشلة/المتخطّاة في قائمة أكواد "
+                "جاهزة + ملف Excel واحد — بدون منصة.",
+        "help": "اختر المجلد اللي فيه تقارير Excel (نتائج/تقارير المتابعة). الأداة تجمع "
+                "كل اللي حالته فشل/تخطّي/معلّق من كل الملفات، وتطلّعلك قائمة أكواد تنسخها "
+                "في خانة «أكواد المباني» (نطاق=أكواد محددة) لإعادة تشغيلها، + ملف Excel مجمّع.",
+        "script": "failed_tracker.py",
+        "launch": "direct",
+    },
 ]
 
 
@@ -141,10 +175,11 @@ def launch(cmd, cwd=None, env_extra=None):
 
 # ================================================================= نموذج إدخال المهمة
 class TaskForm(tk.Toplevel):
-    def __init__(self, master, task, creds):
+    def __init__(self, master, task, creds, state):
         super().__init__(master)
         self.task = task
         self.creds = creds
+        self.state = state
         self.vars = {}
         self.rows = {}  # name -> (label_widget, input_widget) للإظهار الشرطي
         self.title(task["title"])
@@ -164,13 +199,66 @@ class TaskForm(tk.Toplevel):
         for spec in task.get("params", []):
             self._build_row(body, spec)
 
+        # يتذكّر آخر قيم استخدمتها لهذه المهمة
+        self._apply_values(self.state.get("last", {}).get(task["id"], {}))
         self._refresh_conditional()
+        if task.get("params"):
+            self._build_presets_bar()
 
         btns = tk.Frame(self, bg="#f4f6f8", pady=10)
         btns.pack(fill="x")
         tk.Button(btns, text="▶ تشغيل", command=self._run, bg="#1565c0", fg="white",
                   font=("Arial", 12, "bold"), width=14).pack(side="right", padx=14)
         tk.Button(btns, text="إلغاء", command=self.destroy, width=10).pack(side="right")
+
+    # ---- حفظ/تحميل القيم + ملفات التعريف (Presets) ----
+    def _collect_values(self):
+        return {name: self._value(name) for name in self.vars}
+
+    def _apply_values(self, values):
+        for name, val in (values or {}).items():
+            var = self.vars.get(name)
+            if var is None:
+                continue
+            try:
+                if isinstance(var, tk.Text):
+                    var.delete("1.0", "end"); var.insert("1.0", val)
+                elif isinstance(var, tk.BooleanVar):
+                    var.set(bool(val))
+                else:
+                    var.set(val)
+            except Exception:
+                pass
+
+    def _build_presets_bar(self):
+        bar = tk.Frame(self, bg="#e3f2fd", pady=4)
+        bar.pack(fill="x")
+        tk.Label(bar, text="إعداد محفوظ:", bg="#e3f2fd", anchor="e").pack(side="right", padx=4)
+        self._preset_var = tk.StringVar()
+        names = sorted(self.state.get("presets", {}).get(self.task["id"], {}).keys())
+        self._preset_cb = ttk.Combobox(bar, textvariable=self._preset_var, values=names,
+                                       state="readonly", width=16)
+        self._preset_cb.pack(side="right", padx=4)
+        tk.Button(bar, text="حمّل", width=6, command=self._load_preset).pack(side="right", padx=2)
+        tk.Button(bar, text="احفظ إعداد", width=10, command=self._save_preset).pack(side="right", padx=2)
+
+    def _load_preset(self):
+        name = self._preset_var.get()
+        p = self.state.get("presets", {}).get(self.task["id"], {}).get(name)
+        if p:
+            self._apply_values(p)
+            self._refresh_conditional()
+
+    def _save_preset(self):
+        from tkinter import simpledialog
+        name = simpledialog.askstring("حفظ إعداد", "اسم الإعداد:", parent=self)
+        if not name:
+            return
+        self.state.setdefault("presets", {}).setdefault(self.task["id"], {})[name] = self._collect_values()
+        save_state(self.state)
+        self._preset_cb["values"] = sorted(self.state["presets"][self.task["id"]].keys())
+        self._preset_var.set(name)
+        messagebox.showinfo("تم", f"انحفظ الإعداد «{name}»", parent=self)
 
     def _build_row(self, parent, spec):
         name, typ = spec["name"], spec["type"]
@@ -293,6 +381,10 @@ class TaskForm(tk.Toplevel):
         if task.get("pass_creds_positional") and user and pw:
             cmd += [user, pw]
 
+        # يتذكّر هذه القيم للمرة الجاية
+        self.state.setdefault("last", {})[task["id"]] = self._collect_values()
+        save_state(self.state)
+
         try:
             launch(cmd, cwd=task.get("cwd"), env_extra=env_extra)
             messagebox.showinfo("انطلقت الأتمتة",
@@ -307,9 +399,10 @@ class TaskForm(tk.Toplevel):
 class Hub(tk.Tk):
     def __init__(self):
         super().__init__()
+        self.state = load_state()  # يتذكّر آخر إعداداتك + الـ Presets
         self.title(APP_TITLE)
         self.configure(bg="#f4f6f8")
-        self.geometry("560x640")
+        self.geometry("560x680")
         self.resizable(False, True)
 
         tk.Label(self, text="🏛️  " + APP_TITLE, font=("Arial", 16, "bold"),
@@ -339,15 +432,24 @@ class Hub(tk.Tk):
         for task in TASKS:
             card = tk.Frame(wrap, bg="white", bd=1, relief="solid")
             card.pack(fill="x", pady=5)
-            tk.Button(card, text=task["title"], font=("Arial", 12, "bold"),
+            top = tk.Frame(card, bg="white")
+            top.pack(fill="x", padx=8, pady=(6, 0))
+            # زر «؟» شرح على يسار البطاقة
+            tk.Button(top, text="؟", font=("Arial", 10, "bold"), width=2,
+                      fg="#0d47a1", relief="groove",
+                      command=lambda t=task: self.show_help(t)).pack(side="left")
+            tk.Button(top, text=task["title"], font=("Arial", 12, "bold"),
                       bg="white", fg="#0d47a1", anchor="e", relief="flat",
-                      command=lambda t=task: self.open_task(t)).pack(fill="x", padx=8, pady=(6, 0))
+                      command=lambda t=task: self.open_task(t)).pack(side="right", fill="x", expand=True)
             tk.Label(card, text=task["desc"], font=("Arial", 9), bg="white",
                      fg="#666", anchor="e", justify="right", wraplength=500,
                      padx=10).pack(fill="x", pady=(0, 6))
 
     def creds(self):
         return self.user_var.get().strip(), self.pw_var.get().strip()
+
+    def show_help(self, task):
+        messagebox.showinfo(task["title"], task.get("help") or task["desc"], parent=self)
 
     def open_task(self, task):
         if task.get("launch") == "direct":
@@ -364,7 +466,7 @@ class Hub(tk.Tk):
             except Exception as exc:
                 messagebox.showerror("فشل التشغيل", str(exc), parent=self)
             return
-        TaskForm(self, task, self.creds)
+        TaskForm(self, task, self.creds, self.state)
 
 
 if __name__ == "__main__":

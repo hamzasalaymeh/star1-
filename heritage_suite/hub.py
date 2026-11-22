@@ -153,7 +153,7 @@ class TaskForm(tk.Toplevel):
         self.attributes("-topmost", True)
 
         tk.Label(self, text=task["title"], font=("Arial", 14, "bold"),
-                 bg="#1b5e20", fg="white", anchor="e", padx=12, pady=8).pack(fill="x")
+                 bg="#0d47a1", fg="white", anchor="e", padx=12, pady=8).pack(fill="x")
         tk.Label(self, text=task["desc"], font=("Arial", 9), bg="#f4f6f8",
                  fg="#444", anchor="e", justify="right", wraplength=460,
                  padx=12, pady=6).pack(fill="x")
@@ -168,7 +168,7 @@ class TaskForm(tk.Toplevel):
 
         btns = tk.Frame(self, bg="#f4f6f8", pady=10)
         btns.pack(fill="x")
-        tk.Button(btns, text="▶ تشغيل", command=self._run, bg="#27ae60", fg="white",
+        tk.Button(btns, text="▶ تشغيل", command=self._run, bg="#1565c0", fg="white",
                   font=("Arial", 12, "bold"), width=14).pack(side="right", padx=14)
         tk.Button(btns, text="إلغاء", command=self.destroy, width=10).pack(side="right")
 
@@ -313,15 +313,15 @@ class Hub(tk.Tk):
         self.resizable(False, True)
 
         tk.Label(self, text="🏛️  " + APP_TITLE, font=("Arial", 16, "bold"),
-                 bg="#1b5e20", fg="white", pady=12).pack(fill="x")
-        tk.Label(self, text=AUTHOR, font=("Arial", 10), bg="#1b5e20", fg="#c8e6c9").pack(fill="x")
+                 bg="#0d47a1", fg="white", pady=12).pack(fill="x")
+        tk.Label(self, text=AUTHOR, font=("Arial", 10), bg="#0d47a1", fg="#bbdefb").pack(fill="x")
 
         # بيانات الدخول المشتركة (تُدخل مرة، لا تُحفظ على القرص)
         cred = tk.LabelFrame(self, text="بيانات الدخول (اختياري — مرة واحدة)",
                              bg="#f4f6f8", padx=10, pady=8, font=("Arial", 9, "bold"))
         cred.pack(fill="x", padx=14, pady=10)
         self.user_var = tk.StringVar(value="H.qurah")
-        self.pw_var = tk.StringVar(value="")
+        self.pw_var = tk.StringVar(value="313146")
         r1 = tk.Frame(cred, bg="#f4f6f8"); r1.pack(fill="x", pady=2)
         tk.Label(r1, text="اسم المستخدم", bg="#f4f6f8", width=12, anchor="e").pack(side="right")
         tk.Entry(r1, textvariable=self.user_var, justify="right").pack(side="right", fill="x", expand=True, padx=6)
@@ -340,7 +340,7 @@ class Hub(tk.Tk):
             card = tk.Frame(wrap, bg="white", bd=1, relief="solid")
             card.pack(fill="x", pady=5)
             tk.Button(card, text=task["title"], font=("Arial", 12, "bold"),
-                      bg="white", fg="#1b5e20", anchor="e", relief="flat",
+                      bg="white", fg="#0d47a1", anchor="e", relief="flat",
                       command=lambda t=task: self.open_task(t)).pack(fill="x", padx=8, pady=(6, 0))
             tk.Label(card, text=task["desc"], font=("Arial", 9), bg="white",
                      fg="#666", anchor="e", justify="right", wraplength=500,

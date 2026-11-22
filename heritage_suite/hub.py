@@ -93,9 +93,20 @@ TASKS = [
         ],
     },
     {
-        "id": "pdf_export",
-        "title": "📄 تصدير جداول/ملفات المواقع PDF",
-        "desc": "يصدّر استمارات قرار تسجيل معيّن إلى PDF + فهرس Excel.",
+        "id": "export_files",
+        "title": "📸 تصدير ملفات المواقع (3 PDF + الصور)",
+        "desc": "لكل موقع في القرار: قرار الترشيح + استمارة التسجيل + ملخص الاستمارة (PDF) "
+                "+ تحميل كل الصور + فهرس Excel. قابل للاستئناف.",
+        "script": "export_files.py",
+        "params": [
+            {"name": "decision", "label": "رقم قرار التسجيل", "type": "text", "arg": "--decision"},
+            {"name": "output", "label": "مجلد الحفظ", "type": "folder", "arg": "--output"},
+        ],
+    },
+    {
+        "id": "pdf_table",
+        "title": "📄 تصدير جداول معايير التصنيف (PDF)",
+        "desc": "PDF واحد لكل موقع يحتوي جدول «معايير التصنيف» + فهرس Excel (بدون صور).",
         "script": "pdf_export.py",
         "cwd": SCRIPTS,  # ليجد الوحدة المجاورة table_pdf_exporter_advanced
         "params": [

@@ -331,7 +331,7 @@ class Hub(tk.Tk):
                       command=lambda t=task: self.open_task(t)).pack(fill="x", padx=8, pady=(6, 0))
             tk.Label(card, text=task["desc"], font=("Arial", 9), bg="white",
                      fg="#666", anchor="e", justify="right", wraplength=500,
-                     padx=10, pady=(0, 6)).pack(fill="x")
+                     padx=10).pack(fill="x", pady=(0, 6))
 
     def creds(self):
         return self.user_var.get().strip(), self.pw_var.get().strip()

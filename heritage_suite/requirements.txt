@@ -1,0 +1,15 @@
+# متطلبات مجمّع أتمتة التراث — ثبّتها مرة واحدة:
+#   pip install -r requirements.txt
+#   python -m playwright install chromium   (فقط لتصدير PDF)
+
+selenium>=4.20
+webdriver-manager>=4.0
+pandas>=2.0
+openpyxl>=3.1
+rich>=13.0
+arabic-reshaper>=3.0
+python-bidi>=0.4
+requests>=2.31
+beautifulsoup4>=4.12
+tqdm>=4.66
+playwright>=1.44

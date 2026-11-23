@@ -1614,8 +1614,15 @@ def run_auto(args: argparse.Namespace) -> int:
     if not args.decisions:
         args.decisions = list(DEFAULT_DECISIONS)
     if not args.excel:
-        args.excel = Path.cwd() / DEFAULT_EXCEL_NAME
+        # مجلد الحفظ الذي يختاره المستخدم من المركز (HERITAGE_OUTPUT) أو مجلد التشغيل.
+        _base = os.environ.get("HERITAGE_OUTPUT") or str(Path.cwd())
+        try:
+            Path(_base).mkdir(parents=True, exist_ok=True)
+        except Exception:
+            _base = str(Path.cwd())
+        args.excel = Path(_base) / DEFAULT_EXCEL_NAME
     args.excel = Path(args.excel)
+    print(f"📁 ملف النتائج: {args.excel.resolve()}")
     do_save = not args.preview
     mode = "حفظ فعلي" if do_save else "معاينة"
 

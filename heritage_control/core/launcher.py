@@ -52,8 +52,8 @@ def build_command(plugin, values, creds, scripts_dir):
         val = _value(values, name)
         typ = spec["type"]
 
-        if spec.get("required") and typ in ("text", "int", "choice") and not str(val).strip():
-            raise ValueError(f"الحقل «{spec['label']}» مطلوب")
+        if spec.get("required") and not str(val).strip():
+            raise ValueError(f"الحقل «{spec['label']}» مطلوب — حدّده قبل التشغيل")
 
         if spec.get("env"):
             if str(val).strip():

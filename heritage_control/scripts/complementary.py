@@ -45,7 +45,8 @@ def ask_folder():
     return val
 
 # ── 1) اختيار المجلد ──────────────────────────────────────
-FOLDER_PATH = ask_folder()
+# من مركز التحكم: المجلد من اللوحة (HERITAGE_FOLDER)؛ وإلا نافذة الاختيار.
+FOLDER_PATH = os.environ.get("HERITAGE_FOLDER", "").strip() or ask_folder()
 if not FOLDER_PATH: raise ValueError('❌ لم يتم اختيار مجلد')
 print(f'📁 المجلد: {FOLDER_PATH}')
 

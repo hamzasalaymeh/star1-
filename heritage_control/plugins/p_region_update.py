@@ -11,7 +11,7 @@ PLUGIN = {
     "settings": [
         {"name": "HERITAGE_REGION_NAME", "label": "المنطقة الجغرافية", "type": "choice", "choices": REGIONS, "default": "الباحة", "env": True},
         {"name": "HERITAGE_TARGET_STYLE", "label": "الطراز المعماري المستهدف", "type": "text", "default": "المنطقة الجنوبية", "env": True},
-        {"name": "HERITAGE_OUTPUT", "label": "مجلد الحفظ", "type": "folder", "env": True},
+        {"name": "HERITAGE_OUTPUT", "label": "مجلد الحفظ", "type": "folder", "env": True, "required": True},
         {"name": "limit", "label": "عدد مواقع للتجربة (0 = الكل)", "type": "int", "default": 0, "arg": "--limit"},
         {"name": "retry_failed", "label": "إعادة محاولة الفاشلة فقط", "type": "bool", "arg": "--retry-failed"},
     ],

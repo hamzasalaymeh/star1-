@@ -41,8 +41,10 @@ def main():
     pump(app, 1.0)
     s = rv.runner.stats
     assert s["total"] == 60 and s["done"] > 0, f"لا تقدّم: {s}"
-    assert str(s["done"]) in rv.lbl_stats.cget("text"), "العدّاد بالواجهة لم يتحدّث"
-    print(f"✅ تقدّم حيّ بالواجهة: {rv.lbl_stats.cget('text').strip()}")
+    assert rv.tiles["done"].cget("text") == str(s["done"]), "بطاقة «نجح» لم تتحدّث"
+    assert rv.tiles["total"].cget("text") == "60", "بطاقة «الكل» لم تتحدّث"
+    print(f"✅ داش بورد حيّ: الكل={rv.tiles['total'].cget('text')} نجح={rv.tiles['done'].cget('text')} "
+          f"فشل={rv.tiles['failed'].cget('text')} متبقّي={rv.tiles['remaining'].cget('text')} {rv.lbl_pct.cget('text')}")
 
     # إيقاف مؤقت
     rv._pause(); pump(app, 1.0)

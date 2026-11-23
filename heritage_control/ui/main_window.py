@@ -190,17 +190,31 @@ class RunView(tk.Frame):
         if not self.plugin.get("supports_control"):
             self.btn_pause.configure(text="⏸ (غير مدعوم)")
 
-        # ---- المراقبة ----
-        mon = tk.Frame(self, bg=t["card"]); mon.pack(fill="x", padx=12, pady=4)
-        self.lbl_state = tk.Label(mon, text="جاهز", bg=t["card"], fg=t["muted"], font=("Arial", 10, "bold"))
-        self.lbl_state.pack(anchor="e", padx=8, pady=2)
-        self.pbar = ttk.Progressbar(mon, maximum=100, value=0)
-        self.pbar.pack(fill="x", padx=8, pady=2)
-        self.lbl_stats = tk.Label(mon, text="الكل: 0   نجح: 0   فشل: 0   متبقّي: 0   0%",
-                                  bg=t["card"], fg=t["fg"], font=("Arial", 10), anchor="e")
-        self.lbl_stats.pack(fill="x", padx=8)
-        self.lbl_extra = tk.Label(mon, text="", bg=t["card"], fg=t["muted"], font=("Arial", 9), anchor="e")
-        self.lbl_extra.pack(fill="x", padx=8, pady=(0, 4))
+        # ---- لوحة المراقبة (داش بورد): بطاقات مؤشرات + تقدّم + أزمنة ----
+        mon = tk.Frame(self, bg=t["bg"]); mon.pack(fill="x", padx=12, pady=(2, 4))
+        tiles = tk.Frame(mon, bg=t["bg"]); tiles.pack(fill="x")
+        self.tiles = {}
+        for key, label, color in (("total", "الكل", t["fg"]), ("done", "نجح", t["ok"]),
+                                  ("failed", "فشل", t["err"]), ("skipped", "متخطّى", t["warn"]),
+                                  ("remaining", "متبقّي", t["primary"])):
+            cell = tk.Frame(tiles, bg=t["card"], highlightthickness=1, highlightbackground="#c9d6e3")
+            cell.pack(side="right", expand=True, fill="both", padx=3)
+            val = tk.Label(cell, text="0", bg=t["card"], fg=color, font=("Arial", 20, "bold"))
+            val.pack(pady=(8, 0))
+            tk.Label(cell, text=label, bg=t["card"], fg=t["muted"], font=("Arial", 9)).pack(pady=(0, 8))
+            self.tiles[key] = val
+
+        prog = tk.Frame(mon, bg=t["card"], highlightthickness=1, highlightbackground="#c9d6e3")
+        prog.pack(fill="x", pady=6)
+        head = tk.Frame(prog, bg=t["card"]); head.pack(fill="x", padx=10, pady=(8, 0))
+        self.lbl_state = tk.Label(head, text="جاهز", bg=t["card"], fg=t["muted"], font=("Arial", 11, "bold"))
+        self.lbl_state.pack(side="right")
+        self.lbl_pct = tk.Label(head, text="0%", bg=t["card"], fg=t["primary"], font=("Arial", 15, "bold"))
+        self.lbl_pct.pack(side="left")
+        self.pbar = ttk.Progressbar(prog, maximum=100, value=0)
+        self.pbar.pack(fill="x", padx=10, pady=(3, 4))
+        self.lbl_extra = tk.Label(prog, text="", bg=t["card"], fg=t["muted"], font=("Arial", 9), anchor="e")
+        self.lbl_extra.pack(fill="x", padx=10, pady=(0, 8))
 
         # ---- السجل الحيّ ----
         logf = tk.Frame(self, bg=t["bg"]); logf.pack(fill="both", expand=True, padx=12, pady=(2, 10))
@@ -381,14 +395,23 @@ class RunView(tk.Frame):
 
     def _update_monitor(self):
         s = self.runner.stats
-        self.pbar.configure(value=s["percent"])
         rem = self.runner.remaining()
-        self.lbl_stats.configure(
-            text=f"الكل: {s['total']}   نجح: {s['done']}   فشل: {s['failed']}   "
-                 f"متخطّى: {s['skipped']}   متبقّي: {rem}   {s['percent']:.0f}%")
+        self.pbar.configure(value=s["percent"])
+        self.lbl_pct.configure(text=f"{s['percent']:.0f}%")
+        vals = {"total": s["total"], "done": s["done"], "failed": s["failed"],
+                "skipped": s["skipped"], "remaining": rem}
+        for k, lbl in self.tiles.items():
+            lbl.configure(text=str(vals[k]))
+
+        def fmt(x):
+            x = int(x)
+            return f"{x // 60}:{x % 60:02d}"
+
         el = s["elapsed"]
-        extra = f"الموقع الحالي: {s['current'] or '—'}    |    متوسط الموقع: {s['avg']:.1f}ث    |    الزمن: {el//60}:{el%60:02d}"
-        self.lbl_extra.configure(text=extra)
+        eta = int(s["avg"] * rem) if (s["avg"] and rem) else 0
+        self.lbl_extra.configure(
+            text=f"الموقع الحالي: {s['current'] or '—'}    |    متوسط الموقع: {s['avg']:.1f}ث"
+                 f"    |    مضى: {fmt(el)}    |    متبقّي ≈ {fmt(eta)}")
         names = {"running": "▶ شغّال", "paused": "⏸ متوقّف مؤقتاً", "stopping": "⏹ جاري الإيقاف",
                  "stopped": "⏹ أُوقف", "finished": "✅ انتهى", "idle": "جاهز"}
         self.lbl_state.configure(text=names.get(s["state"], s["state"]))

@@ -98,13 +98,15 @@ def parse_range(text):
 # وضعان: (أ) مجلد أب فيه مجلدات قرى  (ب) اختيار ملفات Excel مباشرة
 # في كلا الوضعين: اسم القرية = اسم المجلد اللي فيه ملف الـ Excel،
 # والصور بنفس مجلد الملف.
-USE_PARENT = ask_mode()
+# لو شُغّل من مركز التحكم: المجلد يُحدَّد من اللوحة (HERITAGE_FOLDER) فنتخطّى النوافذ.
+_HUB_FOLDER = os.environ.get("HERITAGE_FOLDER", "").strip()
+USE_PARENT = True if _HUB_FOLDER else ask_mode()
 
 village_folders = []   # قائمة مجلدات القرى (اسم المجلد = اسم القرية)
 
 if USE_PARENT:
     # ── وضع (أ): مجلد أب واحد جوّاه مجلدات القرى ───────────
-    PARENT = ask_parent_folder()
+    PARENT = _HUB_FOLDER or ask_parent_folder()
     if not PARENT:
         raise ValueError('❌ لم يتم اختيار مجلد')
     print(f'📁 المجلد الأب: {PARENT}')
@@ -166,17 +168,20 @@ for i, fld in enumerate(village_folders, 1):
     print(f'   {i}. {os.path.basename(fld.rstrip(chr(47)+chr(92)))}')
 
 # ── 2) رقم قرار التسجيل (مرة واحدة لكل القرى) ──────────────
-REG_DECISION = ask_string(
-    'رقم قرار التسجيل',
-    'رقم قرار التسجيل (نفسه لكل القرى — اتركه فاضي لو ما يلزم):')
+if _HUB_FOLDER:
+    REG_DECISION = os.environ.get("HERITAGE_DECISION", "").strip()
+else:
+    REG_DECISION = ask_string(
+        'رقم قرار التسجيل',
+        'رقم قرار التسجيل (نفسه لكل القرى — اتركه فاضي لو ما يلزم):')
 REG_DECISION = (REG_DECISION or '').strip()
 print(f'📋 رقم قرار التسجيل: {REG_DECISION or "(فاضي)"}')
 
 # ── 3) اختيار range المباني لكل قرية (اختياري بالكامل) ────
 villages_config = []
 
-# سؤال واحد: تبي تحدد نطاقات أصلاً؟ لو لا → كل المباني لكل القرى
-want_ranges = ask_yes_no(
+# من المركز: كل المباني (بدون أسئلة نطاقات). يدوياً: نسأل.
+want_ranges = False if _HUB_FOLDER else ask_yes_no(
     'تحديد مباني',
     'تريد تحديد نطاق مباني معيّنة لأي قرية؟\n\n'
     '• نعم = يسألك عن كل قرية على حدة\n'

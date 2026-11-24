@@ -61,6 +61,64 @@ def _shade(hexc, f):
     return f"#{r:02x}{g:02x}{b:02x}"
 
 
+def enable_clipboard(widget):
+    """يجعل النسخ/اللصق/القص يعمل على حقول الإدخال مهما كانت لغة لوحة المفاتيح
+    (عربي/إنجليزي) + قائمة كليك-يمين. يُطبّق على الحقل وكل أبنائه."""
+    def is_text(w):
+        return isinstance(w, tk.Text)
+
+    def do(w, ev):
+        try:
+            w.event_generate(ev)
+        except Exception:
+            pass
+
+    def select_all(w):
+        try:
+            if is_text(w):
+                w.tag_add("sel", "1.0", "end-1c")
+            else:
+                w.select_range(0, "end")
+        except Exception:
+            pass
+
+    def attach(w):
+        if not isinstance(w, (tk.Entry, tk.Text)):
+            return
+        menu = tk.Menu(w, tearoff=0)
+        menu.add_command(label="قص", command=lambda: do(w, "<<Cut>>"))
+        menu.add_command(label="نسخ", command=lambda: do(w, "<<Copy>>"))
+        menu.add_command(label="لصق", command=lambda: do(w, "<<Paste>>"))
+        menu.add_separator()
+        menu.add_command(label="تحديد الكل", command=lambda: select_all(w))
+
+        def popup(e):
+            try:
+                menu.tk_popup(e.x_root, e.y_root)
+            finally:
+                menu.grab_release()
+            return "break"
+
+        def on_ctrl(e):
+            # نعتمد على keycode (VK على ويندوز) فيعمل مهما كانت لغة لوحة المفاتيح
+            kc = getattr(e, "keycode", None)
+            if kc == 86:   # V
+                do(w, "<<Paste>>"); return "break"
+            if kc == 67:   # C
+                do(w, "<<Copy>>"); return "break"
+            if kc == 88:   # X
+                do(w, "<<Cut>>"); return "break"
+            if kc == 65:   # A
+                select_all(w); return "break"
+
+        w.bind("<Button-3>", popup, add="+")
+        w.bind("<Control-KeyPress>", on_ctrl, add="+")
+
+    attach(widget)
+    for child in widget.winfo_children():
+        enable_clipboard(child)
+
+
 def flat_button(parent, text, command, bg, fg, hover=None, font=(UIFONT, 10, "bold"),
                 padx=16, pady=8, border=None, width=None):
     """زر مسطّح عصري مع تأثير تمرير (hover)."""
@@ -201,6 +259,8 @@ class App(tk.Tk):
         # ===== جسم المحتوى =====
         self.body = tk.Frame(self)
         self.body.pack(fill="both", expand=True, side="top")
+
+        enable_clipboard(self.header)   # نسخ/لصق يعمل على حقلي المستخدم والمرور
 
     def creds(self):
         return self.user_var.get().strip(), self.pw_var.get().strip()
@@ -395,6 +455,8 @@ class RunView(tk.Frame):
         self.log.pack(side="right", fill="both", expand=True)
         for lvl, key in LEVEL_COLORS.items():
             self.log.tag_configure(lvl, foreground=self.t.get(key, self.t["logfg"]))
+
+        enable_clipboard(self)   # نسخ/لصق (كليك يمين + Ctrl مهما كانت لغة الكيبورد) لكل الحقول
 
     # ---- بطاقة بعنوان ----
     def _card(self, parent, title):

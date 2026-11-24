@@ -174,22 +174,30 @@ async def main():
         await exporter.click_search_button()
         await asyncio.sleep(2)
 
-        # جمع روابط الاستمارات - لو فيه حد محدد، يوقف التنقل بمجرد جمع عدد كافي
-        form_links = await exporter.collect_all_form_links(min_links=forms_limit)
-
-        if forms_limit:
-            form_links = form_links[:forms_limit]
-            console.print(f'[cyan]ℹ️ تم تحديد المعالجة لأول {forms_limit} استمارة فقط[/cyan]')
-
         if ONLY_IDS:
-            form_links = [l for l in form_links if l.rstrip('/').split('/')[-1] in ONLY_IDS]
-            found = {l.rstrip('/').split('/')[-1] for l in form_links}
-            missing = sorted(ONLY_IDS - found)
-            console.print(f'[cyan]🎯 وضع أرقام محددة: سيُعالَج {len(form_links)} موقع من {len(ONLY_IDS)} مطلوب[/cyan]')
-            _R.log(f"🎯 معالجة {len(form_links)} موقع محدد فقط", "info")
-            if missing:
-                console.print(f'[yellow]⚠️ أرقام غير موجودة في نتائج هذا القرار: {", ".join(missing)}[/yellow]')
-                _R.log(f"⚠️ غير موجود بالقرار: {', '.join(missing)}", "warn")
+            # وضع أرقام محددة: نبني روابط المعايير مباشرة من الأرقام بدل البحث في
+            # نتائج القرار — فيعمل حتى للمواقع غير المدرجة في بحث المعايير (لكنها
+            # موجودة على المنصة). نأخذ بادئة الرابط من روابط صفحة النتائج الأولى.
+            prefix = None
+            try:
+                page1 = await exporter.get_current_page_form_links()
+                if page1:
+                    prefix = page1[0].rsplit('/', 1)[0] + '/'
+            except Exception:
+                prefix = None
+            if not prefix:
+                base = exporter.config.get('searchUrl', '').split('/Web/')[0]
+                prefix = base + '/Web/App/Pools/DataEdit/'
+            form_links = [prefix + i for i in sorted(ONLY_IDS, key=lambda x: int(x) if x.isdigit() else 0)]
+            console.print(f'[cyan]🎯 وضع أرقام محددة: بناء {len(form_links)} رابط مباشرة من الأرقام[/cyan]')
+            console.print(f'[dim]   بادئة الرابط: {prefix}[/dim]')
+            _R.log(f"🎯 بناء {len(form_links)} رابط مباشرة من الأرقام", "info")
+        else:
+            # جمع روابط الاستمارات - لو فيه حد محدد، يوقف التنقل بمجرد جمع عدد كافي
+            form_links = await exporter.collect_all_form_links(min_links=forms_limit)
+            if forms_limit:
+                form_links = form_links[:forms_limit]
+                console.print(f'[cyan]ℹ️ تم تحديد المعالجة لأول {forms_limit} استمارة فقط[/cyan]')
 
         if not form_links:
             console.print('[bold red]❌ لم يتم العثور على أي استمارات لهذا القرار[/bold red]')

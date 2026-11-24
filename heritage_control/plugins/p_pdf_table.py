@@ -11,5 +11,7 @@ PLUGIN = {
         {"name": "decision", "label": "رقم قرار التسجيل", "type": "text", "positional": True, "required": True},
         {"name": "HERITAGE_OUTPUT", "label": "مجلد الحفظ", "type": "folder", "env": True, "required": True},
         {"name": "limit", "label": "عدد الاستمارات (فاضي = الكل)", "type": "text", "positional": True},
+        {"name": "HERITAGE_ONLY_IDS", "label": "أرقام مواقع محددة فقط (اختياري، تفصلها فاصلة)",
+         "type": "textarea", "env": True},
     ],
 }

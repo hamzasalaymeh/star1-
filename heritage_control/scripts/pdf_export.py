@@ -139,7 +139,14 @@ async def main():
 
     # مجلد الحفظ: يختاره المستخدم (متغيّر البيئة HERITAGE_OUTPUT) أو الافتراضي.
     out_base = os.environ.get("HERITAGE_OUTPUT") or "exports"
-    out_dir = os.path.join(out_base, f"قرار_{decision_number}")
+
+    # وضع «أرقام مواقع محددة» (اختياري): يصدّر فقط المواقع المطلوبة بأرقامها،
+    # ويحفظها مباشرة داخل مجلد الحفظ نفسه لتندمج مع مجلدات المعايير الموجودة.
+    _only_raw = (os.environ.get("HERITAGE_ONLY_IDS") or "").strip()
+    _only_raw = _only_raw.replace("،", ",").replace("\n", ",").replace(" ", ",")
+    ONLY_IDS = {x.strip() for x in _only_raw.split(",") if x.strip()} if _only_raw else None
+
+    out_dir = out_base if ONLY_IDS else os.path.join(out_base, f"قرار_{decision_number}")
 
     exporter = AdvancedTablePDFExporter(
         username,
@@ -173,6 +180,16 @@ async def main():
         if forms_limit:
             form_links = form_links[:forms_limit]
             console.print(f'[cyan]ℹ️ تم تحديد المعالجة لأول {forms_limit} استمارة فقط[/cyan]')
+
+        if ONLY_IDS:
+            form_links = [l for l in form_links if l.rstrip('/').split('/')[-1] in ONLY_IDS]
+            found = {l.rstrip('/').split('/')[-1] for l in form_links}
+            missing = sorted(ONLY_IDS - found)
+            console.print(f'[cyan]🎯 وضع أرقام محددة: سيُعالَج {len(form_links)} موقع من {len(ONLY_IDS)} مطلوب[/cyan]')
+            _R.log(f"🎯 معالجة {len(form_links)} موقع محدد فقط", "info")
+            if missing:
+                console.print(f'[yellow]⚠️ أرقام غير موجودة في نتائج هذا القرار: {", ".join(missing)}[/yellow]')
+                _R.log(f"⚠️ غير موجود بالقرار: {', '.join(missing)}", "warn")
 
         if not form_links:
             console.print('[bold red]❌ لم يتم العثور على أي استمارات لهذا القرار[/bold red]')
@@ -280,9 +297,16 @@ async def main():
                              style=panel_style, box=box.DOUBLE))
 
         # فهرس Excel بروابط نسبية تشتغل من أي جهاز
-        excel_path = build_excel_index(exporter.config['outputDir'], decision_number, results)
-        console.print(f'[bold cyan]📊 تم إنشاء فهرس Excel:[/bold cyan] {excel_path}')
-        _R.log(f"📊 فهرس Excel: {excel_path}", "ok")
+        # في وضع «أرقام محددة» لا نكتب فهرساً حتى لا نطمس فهرس المعايير الأصلي؛
+        # النتائج ستُدمج في الدليل الشامل بدل ذلك.
+        if ONLY_IDS:
+            console.print('[cyan]ℹ️ وضع أرقام محددة: لم يُكتب فهرس Excel (ستُدمج المواقع في دليلك الشامل).[/cyan]')
+            new_folders = [r.get('siteName') or r['name'] for r in results if r['status'] == 'success']
+            console.print('[bold]المجلدات الجديدة:[/bold] ' + ' | '.join(new_folders))
+        else:
+            excel_path = build_excel_index(exporter.config['outputDir'], decision_number, results)
+            console.print(f'[bold cyan]📊 تم إنشاء فهرس Excel:[/bold cyan] {excel_path}')
+            _R.log(f"📊 فهرس Excel: {excel_path}", "ok")
         _R.done(ok=success_count, failed=len(results) - success_count, skipped=skip_n)
 
     except Exception as e:

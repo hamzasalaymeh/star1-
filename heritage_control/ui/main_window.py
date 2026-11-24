@@ -29,17 +29,19 @@ MONO    = "Consolas"
 THEMES = {
     "light": {
         "bg": "#eef1f8", "card": "#ffffff", "fg": "#141b2d", "muted": "#64748b",
-        "primary": "#2563eb", "primaryd": "#1d4ed8",
+        "primary": "#4f46e5", "primaryd": "#4338ca",
         "head": "#15223b", "head2": "#1e3a8a", "headfg": "#ffffff", "headmut": "#9db4d8",
-        "ok": "#16a34a", "err": "#dc2626", "warn": "#d97706", "accent": "#0ea5e9",
+        "ok": "#059669", "err": "#e11d48", "warn": "#d97706", "accent": "#0891b2",
+        "ring": "#6366f1", "ringtrack": "#e2e8f0", "panel": "#f7f9fd",
         "border": "#dbe3ef", "logbg": "#0b1220", "logfg": "#cbd5e1",
         "footer": "#e3e8f2", "footerfg": "#5a6b85", "pill": "#eef4ff",
     },
     "dark": {
         "bg": "#0f172a", "card": "#1b263b", "fg": "#e6edf6", "muted": "#94a3b8",
-        "primary": "#3b82f6", "primaryd": "#2563eb",
+        "primary": "#6366f1", "primaryd": "#4f46e5",
         "head": "#0a1120", "head2": "#14213d", "headfg": "#eaf2ff", "headmut": "#7f93b4",
-        "ok": "#22c55e", "err": "#ef4444", "warn": "#f59e0b", "accent": "#38bdf8",
+        "ok": "#10b981", "err": "#fb7185", "warn": "#fbbf24", "accent": "#22d3ee",
+        "ring": "#818cf8", "ringtrack": "#334155", "panel": "#111c30",
         "border": "#334155", "logbg": "#060b16", "logfg": "#cbd5e1",
         "footer": "#0a1120", "footerfg": "#7c8aa5", "pill": "#1e2b44",
     },
@@ -59,6 +61,20 @@ def _shade(hexc, f):
     r, g, b = int(hexc[0:2], 16), int(hexc[2:4], 16), int(hexc[4:6], 16)
     r, g, b = (max(0, min(255, int(c * f))) for c in (r, g, b))
     return f"#{r:02x}{g:02x}{b:02x}"
+
+
+def _rgb(hexc):
+    hexc = hexc.lstrip("#")
+    if len(hexc) == 3:
+        hexc = "".join(c * 2 for c in hexc)
+    return int(hexc[0:2], 16), int(hexc[2:4], 16), int(hexc[4:6], 16)
+
+
+def _mix(c1, c2, t):
+    """امزج c1→c2 بنسبة t (0..1). يُستخدم للخلفيات الخفيفة الملوّنة."""
+    a, b = _rgb(c1), _rgb(c2)
+    r, g, bl = (int(a[i] + (b[i] - a[i]) * t) for i in range(3))
+    return f"#{r:02x}{g:02x}{bl:02x}"
 
 
 def enable_clipboard(widget):
@@ -404,40 +420,78 @@ class RunView(tk.Frame):
         if not self.plugin.get("supports_control"):
             self.btn_pause.configure(text="⏸  (غير مدعوم)")
 
-        # ---- الداش بورد: بطاقات مؤشرات ----
-        tiles = tk.Frame(self, bg=t["bg"])
-        tiles.pack(fill="x", padx=16, pady=(2, 4))
-        self.tiles = {}
-        specs = (("total", "الإجمالي", t["primary"]), ("done", "نجح", t["ok"]),
-                 ("failed", "فشل", t["err"]), ("skipped", "تنبيه/تخطّي", t["warn"]),
-                 ("remaining", "المتبقّي", t["accent"]))
-        for key, label, color in specs:
-            cell = tk.Frame(tiles, bg=t["card"], highlightthickness=1, highlightbackground=t["border"])
-            cell.pack(side="right", expand=True, fill="both", padx=4)
-            tk.Frame(cell, bg=color, height=4).pack(fill="x")
-            val = tk.Label(cell, text="0", bg=t["card"], fg=color, font=(UIFONT, 26, "bold"))
-            val.pack(pady=(12, 2))
-            tk.Label(cell, text=label, bg=t["card"], fg=t["muted"],
-                     font=(UIFONT, 10)).pack(pady=(0, 12))
-            self.tiles[key] = val
+        # ============ الداش بورد الاحترافي التفاعلي ============
+        dash = tk.Frame(self, bg=t["card"], highlightthickness=1, highlightbackground=t["border"])
+        dash.pack(fill="x", padx=16, pady=(4, 6))
 
-        # ---- التقدّم ----
-        prog = tk.Frame(self, bg=t["card"], highlightthickness=1, highlightbackground=t["border"])
-        prog.pack(fill="x", padx=16, pady=6)
-        head = tk.Frame(prog, bg=t["card"])
-        head.pack(fill="x", padx=14, pady=(12, 2))
-        self.lbl_state = tk.Label(head, text="● جاهز", bg=t["card"], fg=t["muted"],
-                                  font=(UIFONT, 12, "bold"))
-        self.lbl_state.pack(side="right")
-        self.lbl_pct = tk.Label(head, text="0%", bg=t["card"], fg=t["primary"],
-                                font=(UIFONT, 22, "bold"))
-        self.lbl_pct.pack(side="left")
-        self.pbar = ttk.Progressbar(prog, maximum=100, value=0,
+        # شريط علوي: العنوان + نقطة الحالة النابضة + نص الحالة
+        topbar = tk.Frame(dash, bg=t["card"])
+        topbar.pack(fill="x", padx=16, pady=(12, 4))
+        tk.Label(topbar, text="لوحة المتابعة الحيّة", bg=t["card"], fg=t["fg"],
+                 font=(UIFONT, 12, "bold"), anchor="e").pack(side="right")
+        self.state_dot = tk.Canvas(topbar, width=14, height=14, bg=t["card"],
+                                   highlightthickness=0)
+        self.state_dot.pack(side="left")
+        self._dot_id = self.state_dot.create_oval(2, 2, 12, 12, fill=t["muted"], outline="")
+        self.lbl_state = tk.Label(topbar, text="جاهز", bg=t["card"], fg=t["muted"],
+                                  font=(UIFONT, 11, "bold"))
+        self.lbl_state.pack(side="left", padx=6)
+
+        body = tk.Frame(dash, bg=t["card"])
+        body.pack(fill="x", padx=16, pady=(0, 6))
+
+        # يمين: حلقة التقدّم الدائرية (Canvas) مع النسبة في المنتصف
+        ringwrap = tk.Frame(body, bg=t["card"])
+        ringwrap.pack(side="right", padx=(10, 0))
+        self.RING = 150
+        self.ring = tk.Canvas(ringwrap, width=self.RING, height=self.RING,
+                              bg=t["card"], highlightthickness=0)
+        self.ring.pack()
+        self.lbl_pct = tk.Label(ringwrap, text="0%", bg=t["card"], fg=t["ring"],
+                                font=(UIFONT, 30, "bold"))
+        self.lbl_pct.place(in_=self.ring, relx=0.5, rely=0.44, anchor="center")
+        self.lbl_ring_sub = tk.Label(ringwrap, text="جاهز", bg=t["card"], fg=t["muted"],
+                                     font=(UIFONT, 9))
+        self.lbl_ring_sub.place(in_=self.ring, relx=0.5, rely=0.66, anchor="center")
+        self._ring_angle = 0
+
+        # يسار: بطاقات المؤشّرات (شبكة 2×2 + الإجمالي عريض) بخلفيات ملوّنة خفيفة
+        grid = tk.Frame(body, bg=t["card"])
+        grid.pack(side="right", fill="both", expand=True, padx=(0, 14))
+        self.tiles = {}
+        specs = [("done", "نجح", t["ok"], "✓"), ("failed", "فشل", t["err"], "✕"),
+                 ("remaining", "المتبقّي", t["accent"], "⏳"), ("skipped", "تنبيه/تخطّي", t["warn"], "!"),
+                 ("total", "الإجمالي", t["ring"], "∑")]
+        posn = [(0, 1), (0, 0), (1, 1), (1, 0), (2, 0, 2)]
+        for (spec, pos) in zip(specs, posn):
+            key, label, color, icon = spec
+            tint = _mix(t["card"], color, 0.12)
+            cell = tk.Frame(grid, bg=tint, highlightthickness=1, highlightbackground=_mix(t["card"], color, 0.30))
+            if len(pos) == 3:
+                cell.grid(row=pos[0], column=pos[1], columnspan=pos[2], sticky="nsew", padx=4, pady=4)
+            else:
+                cell.grid(row=pos[0], column=pos[1], sticky="nsew", padx=4, pady=4)
+            line = tk.Frame(cell, bg=tint)
+            line.pack(fill="x", padx=12, pady=(10, 0))
+            tk.Label(line, text=label, bg=tint, fg=t["muted"], font=(UIFONT, 10)).pack(side="right")
+            tk.Label(line, text=icon, bg=tint, fg=color, font=(UIFONT, 12, "bold")).pack(side="left")
+            val = tk.Label(cell, text="0", bg=tint, fg=color, font=(UIFONT, 24, "bold"), anchor="e")
+            val.pack(fill="x", padx=12, pady=(0, 10))
+            self.tiles[key] = val
+        for c in (0, 1):
+            grid.grid_columnconfigure(c, weight=1, uniform="k")
+
+        # شريط تقدّم أفقي (يتحوّل «غير محدّد» أثناء جمع الروابط) + سطر المعلومات
+        self.pbar = ttk.Progressbar(dash, maximum=100, value=0,
                                     style="HC.Horizontal.TProgressbar")
-        self.pbar.pack(fill="x", padx=14, pady=(4, 6))
-        self.lbl_extra = tk.Label(prog, text="— بانتظار بدء التشغيل —", bg=t["card"],
+        self.pbar.pack(fill="x", padx=16, pady=(6, 4))
+        self._indeterminate = False
+        self.lbl_extra = tk.Label(dash, text="— بانتظار بدء التشغيل —", bg=t["card"],
                                   fg=t["muted"], font=(UIFONT, 10), anchor="e")
-        self.lbl_extra.pack(fill="x", padx=14, pady=(0, 12))
+        self.lbl_extra.pack(fill="x", padx=16, pady=(0, 12))
+
+        self._draw_ring(0)
+        self._anim()   # حلقة تحريك ناعمة (نقطة نابضة + دوران أثناء التحضير)
 
         # ---- السجل الحيّ ----
         logcard = tk.Frame(self, bg=t["card"], highlightthickness=1, highlightbackground=t["border"])
@@ -646,12 +700,73 @@ class RunView(tk.Frame):
         else:
             self._polling = False
 
+    # ---------- رسم الحلقة الدائرية ----------
+    def _draw_ring(self, pct, spin_angle=None):
+        try:
+            c = self.ring
+        except Exception:
+            return
+        c.delete("all")
+        t = self.t
+        W = 15
+        m = W / 2 + 3
+        R = self.RING
+        box = (m, m, R - m, R - m)
+        # المسار (خلفية الحلقة)
+        c.create_arc(*box, start=0, extent=359.9, style="arc", width=W, outline=t["ringtrack"])
+        if spin_angle is not None:
+            # وضع «جاري التحضير»: قوس قصير يدور
+            c.create_arc(*box, start=spin_angle, extent=-90, style="arc", width=W, outline=t["ring"])
+        else:
+            ext = -(max(0.0, min(100.0, pct)) / 100.0 * 360.0)
+            if ext:
+                c.create_arc(*box, start=90, extent=ext, style="arc", width=W, outline=t["ring"])
+
+    # ---------- حلقة التحريك الناعمة ----------
+    def _anim(self):
+        if not self.winfo_exists():
+            return
+        self._ring_angle = (self._ring_angle + 11) % 360
+        running = self.runner.running
+        collecting = running and self.runner.stats.get("total", 0) == 0
+        # نقطة الحالة النابضة
+        try:
+            import math
+            self._pulse = getattr(self, "_pulse", 0) + 1
+            base = getattr(self, "_state_color", self.t["muted"])
+            if running:
+                k = 0.78 + 0.22 * (0.5 + 0.5 * math.sin(self._pulse / 3.0))
+                self.state_dot.itemconfigure(self._dot_id, fill=_shade(base, k))
+            else:
+                self.state_dot.itemconfigure(self._dot_id, fill=base)
+        except Exception:
+            pass
+        if collecting:
+            self._draw_ring(0, spin_angle=self._ring_angle)
+        self.after(90, self._anim)
+
     def _update_monitor(self):
         t = self.t
         s = self.runner.stats
         rem = self.runner.remaining()
-        self.pbar.configure(value=s["percent"])
-        self.lbl_pct.configure(text=f"{s['percent']:.0f}%")
+        running = self.runner.running
+        collecting = running and s["total"] == 0 and s["state"] == "running"
+
+        # الشريط الأفقي: غير-محدّد أثناء التحضير، ومحدّد بعد معرفة الإجمالي
+        if collecting and not self._indeterminate:
+            self.pbar.configure(mode="indeterminate"); self.pbar.start(16); self._indeterminate = True
+        elif not collecting and self._indeterminate:
+            self.pbar.stop(); self.pbar.configure(mode="determinate"); self._indeterminate = False
+        if not collecting:
+            self.pbar.configure(value=s["percent"])
+            self.lbl_pct.configure(text=f"{s['percent']:.0f}%")
+            self._draw_ring(s["percent"])
+            self.lbl_ring_sub.configure(text=f"{s['done']+s['failed']+s['skipped']:,} / {s['total']:,}"
+                                        if s["total"] else "—")
+        else:
+            self.lbl_pct.configure(text="…")
+            self.lbl_ring_sub.configure(text="تحضير")
+
         vals = {"total": s["total"], "done": s["done"], "failed": s["failed"],
                 "skipped": s["skipped"], "remaining": rem}
         for k, lbl in self.tiles.items():
@@ -663,16 +778,26 @@ class RunView(tk.Frame):
             m, sec = divmod(rem2, 60)
             return f"{h}:{m:02d}:{sec:02d}" if h else f"{m}:{sec:02d}"
 
-        el = s["elapsed"]
-        eta = int(s["avg"] * rem) if (s["avg"] and rem) else 0
-        self.lbl_extra.configure(
-            text=f"الموقع الحالي: {s['current'] or '—'}      "
-                 f"متوسط الموقع: {s['avg']:.1f}ث      مضى: {fmt(el)}      متبقٍّ ≈ {fmt(eta)}")
-        states = {"running": ("● شغّال", t["ok"]), "paused": ("⏸ متوقّف مؤقتاً", t["warn"]),
-                  "stopping": ("⏹ جاري الإيقاف", t["warn"]), "stopped": ("⏹ أُوقف", t["err"]),
-                  "finished": ("✅ انتهى", t["ok"]), "idle": ("● جاهز", t["muted"])}
-        txt, col = states.get(s["state"], (s["state"], t["muted"]))
+        if collecting:
+            self.lbl_extra.configure(
+                text="⏳ جاري تسجيل الدخول وجمع روابط المواقع… اللوحة تبدأ بالتحرّك بعد انتهاء الجمع")
+        else:
+            el = s["elapsed"]
+            eta = int(s["avg"] * rem) if (s["avg"] and rem) else 0
+            self.lbl_extra.configure(
+                text=f"📍 {s['current'] or '—'}      ⏱ متوسط: {s['avg']:.1f}ث      "
+                     f"⏲ مضى: {fmt(el)}      ⏳ متبقٍّ ≈ {fmt(eta)}")
+
+        states = {"running": ("شغّال", t["ok"]), "paused": ("متوقّف مؤقتاً", t["warn"]),
+                  "stopping": ("جاري الإيقاف", t["warn"]), "stopped": ("أُوقف", t["err"]),
+                  "finished": ("انتهى ✅", t["ok"]), "idle": ("جاهز", t["muted"])}
+        if collecting:
+            txt, col = "جاري التحضير…", t["accent"]
+        else:
+            txt, col = states.get(s["state"], (s["state"], t["muted"]))
+        self._state_color = col
         self.lbl_state.configure(text=txt, fg=col)
+        self.lbl_ring_sub.configure(fg=col if collecting else t["muted"])
 
     def _on_finish(self, ev):
         self._update_monitor()

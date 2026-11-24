@@ -574,6 +574,16 @@ def download_photos(building: dict, photos_root: str, session: requests.Session)
             result['failed'] = -2
             return result
 
+    # استبعاد الروابط الزخرفية الواضحة (ليست صوراً للمبنى): أيقونة/شعار/مصغّرة/خريطة…
+    # هذه عناصر قالبية ثابتة في كل صفحة وكثيراً ما تعيد 403 أو محتوى غير صورة،
+    # فكانت تُحسب خطأً «صورة فاشلة» وتُفشِل المبنى كاملاً رغم نزول كل صوره الحقيقية.
+    _JUNK = ('thumb', 'thumbnail', 'icon', 'logo', 'placeholder', 'no-image',
+             'noimage', 'no_image', 'avatar', 'spacer', 'blank', 'loading',
+             'default-', 'map-marker', 'marker.', 'sprite', 'favicon')
+    filtered = [u for u in photo_urls if not any(j in u.lower() for j in _JUNK)]
+    if filtered:  # لا نفرّغ القائمة لو كانت كلها «مشبوهة» الأسماء
+        photo_urls = filtered
+
     result['found'] = len(photo_urls)
 
     for idx, url in enumerate(photo_urls, start=1):
@@ -927,6 +937,7 @@ async def run_automation(buildings: list, dirs: dict, progress: dict):
             bname = artifact_stem(building)
             pbar.set_postfix_str(f"{bname[:35]}")
             errors = []
+            warnings = []
 
             # ── 1. قرار الترشيح ──
             if building.get('nomination_url'):
@@ -953,22 +964,33 @@ async def run_automation(buildings: list, dirs: dict, progress: dict):
                 errors.append('summary_url_missing')
 
             # ── 4. الصور ──
+            def _classify_photos(pr):
+                """يُفشِل المبنى فقط عند ضياع صور حقيقية؛ فشل رابط/رابطين مع نجاح
+                باقي الصور يُسجَّل كتنبيه ولا يُعدّ فشلاً."""
+                failed = pr.get('failed', 0)
+                got    = pr.get('downloaded', 0) + pr.get('skipped', 0)
+                found  = pr.get('found', 0)
+                if failed in (-1, -2):
+                    errors.append('photos_page_error')          # تعذّر فتح صفحة الصور
+                elif found > 0 and got == 0:
+                    errors.append('photos_none')                # يوجد صور لكن لم ينزل أيٌّ منها
+                elif failed and failed > 0:
+                    warnings.append(f"photos_partial_{failed}/{found}")  # تنبيه فقط
+
             try:
                 photo_result = download_photos(building, dirs['photos'], photo_session)
                 if photo_result.get('failed', 0) == -1:
                     refresh_session()
                     photo_session = make_session()
                     photo_result  = download_photos(building, dirs['photos'], photo_session)
-                if photo_result.get('failed', 0) != 0:
-                    errors.append(f"photos_failed_{photo_result.get('failed')}")
+                _classify_photos(photo_result)
             except RuntimeError as exc:
                 if 'SESSION_EXPIRED' in str(exc):
                     refresh_session()
                     photo_session = make_session()
                     try:
                         photo_result = download_photos(building, dirs['photos'], photo_session)
-                        if photo_result.get('failed', 0) != 0:
-                            errors.append(f"photos_failed_{photo_result.get('failed')}")
+                        _classify_photos(photo_result)
                     except Exception as retry_exc:
                         errors.append(f'photos_error: {str(retry_exc)[:40]}')
                 else:
@@ -979,14 +1001,22 @@ async def run_automation(buildings: list, dirs: dict, progress: dict):
             # ── حفظ التقدم ──
             if errors:
                 existing = next((f for f in progress['failed'] if f['id'] == bid), None)
+                entry = {'name': sanitize(building['name']), 'errors': errors}
+                if warnings:
+                    entry['warnings'] = warnings
                 if existing:
-                    existing.update({'name': sanitize(building['name']), 'errors': errors})
+                    existing.update(entry)
                 else:
-                    progress['failed'].append({'id': bid, 'name': bname, 'errors': errors})
+                    progress['failed'].append({'id': bid, **entry})
             else:
+                # نجاح — حتى لو كان هناك تنبيه صور جزئي (كل الصور الحقيقية نزلت)
                 if bid not in progress['completed']:
                     progress['completed'].append(bid)
                 progress['failed'] = [f for f in progress['failed'] if f['id'] != bid]
+                if warnings:
+                    progress.setdefault('warned', {})[bid] = {'name': bname, 'warnings': warnings}
+                else:
+                    progress.get('warned', {}).pop(bid, None)
                 successful_since_excel += 1
 
             save_progress(PROGRESS_FILE, progress)
@@ -1011,10 +1041,13 @@ async def run_automation(buildings: list, dirs: dict, progress: dict):
     except PermissionError:
         excel_path = "تعذر تحديثه لأن الملف مفتوح؛ أغلق Excel وأعد تشغيل البرنامج"
 
+    warned = progress.get('warned', {})
     print(f"\n{'='*55}")
     print("  🎉 اكتملت العملية!")
     print(f"  ✅ مكتمل : {len(progress['completed']):,}")
     print(f"  ❌ فاشل  : {len(progress['failed']):,}")
+    if warned:
+        print(f"  ⚠️ مكتمل مع تنبيه (رابط غير-صورة فشل، وكل الصور الحقيقية نزلت): {len(warned):,}")
     print(f"  📊 Excel : {excel_path}")
     if progress['failed']:
         print("\n  المباني الفاشلة:")

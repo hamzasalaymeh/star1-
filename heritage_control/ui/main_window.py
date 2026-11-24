@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
-"""مركز تحكم أتمتة التراث — الواجهة (Tkinter). تتكلّم مع المحرّك المعزول،
-فلا تتجمّد أثناء التشغيل (تسحب الأحداث عبر مؤقّت)، وأزرارها متصلة فعلاً بالمحرّك."""
+"""مركز تحكم أتمتة التراث العمراني — الواجهة (Tkinter، تصميم احترافي عصري).
+
+تتكلّم مع المحرّك المعزول عبر مؤقّت (after) فلا تتجمّد أثناء التشغيل، وأزرارها
+متصلة فعلاً بالمحرّك. تدعم ثيم فاتح/داكن، RTL عربي، وداش بورد حيّ ببطاقات مؤشرات.
+"""
 import os
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog
@@ -13,33 +16,86 @@ from plugins.registry import discover
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCRIPTS = os.path.join(HERE, "scripts")
 
+# ── الهوية / حقوق العمل والنشر (تظهر دائماً أسفل البرنامج) ──
+APP_NAME   = "مركز تحكم أتمتة التراث العمراني"
+APP_VER    = "2.0"
+AUTHOR_AR  = "المهندس حمزة السلايمة"
+AUTHOR_EN  = "ENG. Hamza ALsalaymeh"
+COPYRIGHT  = f"© 2026  تطوير: {AUTHOR_AR}  ({AUTHOR_EN})  ·  جميع الحقوق محفوظة"
+
+UIFONT  = "Segoe UI"      # يسقط تلقائياً لخط افتراضي إن لم يتوفّر
+MONO    = "Consolas"
+
 THEMES = {
-    "light": {"bg": "#eef2f7", "card": "#ffffff", "fg": "#1a2733", "muted": "#5b6b7a",
-              "primary": "#1565c0", "head": "#0d47a1", "headfg": "#ffffff",
-              "ok": "#2e7d32", "err": "#c62828", "warn": "#e67e22",
-              "logbg": "#0f1b2a", "logfg": "#d6e4f0", "bar": "#1565c0", "entry": "#ffffff"},
-    "dark": {"bg": "#121a24", "card": "#1b2735", "fg": "#e6eef6", "muted": "#9fb2c4",
-             "primary": "#4f9be0", "head": "#0b2238", "headfg": "#eaf3ff",
-             "ok": "#66bb6a", "err": "#ef5350", "warn": "#ffa726",
-             "logbg": "#0a1420", "logfg": "#cfe2f2", "bar": "#4f9be0", "entry": "#223345"},
+    "light": {
+        "bg": "#eef1f8", "card": "#ffffff", "fg": "#141b2d", "muted": "#64748b",
+        "primary": "#2563eb", "primaryd": "#1d4ed8",
+        "head": "#15223b", "head2": "#1e3a8a", "headfg": "#ffffff", "headmut": "#9db4d8",
+        "ok": "#16a34a", "err": "#dc2626", "warn": "#d97706", "accent": "#0ea5e9",
+        "border": "#dbe3ef", "logbg": "#0b1220", "logfg": "#cbd5e1",
+        "footer": "#e3e8f2", "footerfg": "#5a6b85", "pill": "#eef4ff",
+    },
+    "dark": {
+        "bg": "#0f172a", "card": "#1b263b", "fg": "#e6edf6", "muted": "#94a3b8",
+        "primary": "#3b82f6", "primaryd": "#2563eb",
+        "head": "#0a1120", "head2": "#14213d", "headfg": "#eaf2ff", "headmut": "#7f93b4",
+        "ok": "#22c55e", "err": "#ef4444", "warn": "#f59e0b", "accent": "#38bdf8",
+        "border": "#334155", "logbg": "#060b16", "logfg": "#cbd5e1",
+        "footer": "#0a1120", "footerfg": "#7c8aa5", "pill": "#1e2b44",
+    },
 }
 
 LEVEL_COLORS = {"ok": "ok", "error": "err", "fail": "err", "warn": "warn",
                 "skip": "muted", "preview": "primary", "info": "logfg"}
 
 
+def _shade(hexc, f):
+    """تفتيح/تغميق لون سداسي (f<1 أغمق، f>1 أفتح)."""
+    hexc = hexc.lstrip("#")
+    if len(hexc) == 3:
+        hexc = "".join(c * 2 for c in hexc)
+    if len(hexc) != 6:
+        hexc = "808080"
+    r, g, b = int(hexc[0:2], 16), int(hexc[2:4], 16), int(hexc[4:6], 16)
+    r, g, b = (max(0, min(255, int(c * f))) for c in (r, g, b))
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+def flat_button(parent, text, command, bg, fg, hover=None, font=(UIFONT, 10, "bold"),
+                padx=16, pady=8, border=None, width=None):
+    """زر مسطّح عصري مع تأثير تمرير (hover)."""
+    hover = hover or _shade(bg, 0.90)
+    kw = dict(text=text, command=command, relief="flat", bd=0, cursor="hand2",
+              font=font, fg=fg, bg=bg, activebackground=hover, activeforeground=fg,
+              padx=padx, pady=pady, highlightthickness=0)
+    if width:
+        kw["width"] = width
+    if border:
+        kw.update(highlightthickness=1, highlightbackground=border, highlightcolor=border)
+    b = tk.Button(parent, **kw)
+    b._bg, b._hover = bg, hover
+    b.bind("<Enter>", lambda e: e.widget["state"] == "normal" and e.widget.config(bg=e.widget._hover))
+    b.bind("<Leave>", lambda e: e.widget["state"] == "normal" and e.widget.config(bg=e.widget._bg))
+    return b
+
+
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("مركز تحكم أتمتة مشروع التراث العمراني")
-        self.geometry("920x720")
-        self.minsize(820, 600)
+        self.title(f"{APP_NAME}")
+        self.geometry("980x760")
+        self.minsize(860, 640)
         self.state_data = state_mod.load()
         self.theme_name = self.state_data.get("theme", "light")
         self.plugins = discover()
         self.user_var = tk.StringVar(value=self.state_data.get("username", "H.qurah"))
-        self.pw_var = tk.StringVar(value="313146")  # معبّأة، لا تُحفظ على القرص
-        self._cmd_override = None  # للاختبار فقط
+        self.pw_var = tk.StringVar(value="313146")   # معبّأة، لا تُحفظ على القرص
+        self._cmd_override = None                      # للاختبار فقط
+        self.style = ttk.Style(self)
+        try:
+            self.style.theme_use("clam")
+        except tk.TclError:
+            pass
         self._build()
         self.apply_theme()
         self.show_gallery()
@@ -54,48 +110,97 @@ class App(tk.Tk):
         self.state_data["theme"] = self.theme_name
         state_mod.save(self.state_data)
         self.apply_theme()
-        # إعادة بناء الشاشة الحالية لتطبيق الألوان
         if getattr(self, "_current", "gallery") == "gallery":
             self.show_gallery()
 
+    def _style_ttk(self):
+        t = self.T
+        s = self.style
+        s.configure("HC.Horizontal.TProgressbar", troughcolor=_shade(t["bg"], 0.94),
+                    background=t["primary"], bordercolor=t["bg"], lightcolor=t["primary"],
+                    darkcolor=t["primary"], thickness=20, borderwidth=0)
+        s.configure("TCombobox", fieldbackground=t["card"], background=t["card"],
+                    foreground=t["fg"], arrowcolor=t["fg"], bordercolor=t["border"],
+                    lightcolor=t["border"], darkcolor=t["border"])
+        s.map("TCombobox", fieldbackground=[("readonly", t["card"])],
+              foreground=[("readonly", t["fg"])])
+        s.configure("Vertical.TScrollbar", background=t["border"], troughcolor=t["bg"],
+                    bordercolor=t["bg"], arrowcolor=t["muted"])
+
     def apply_theme(self):
         t = self.T
+        self._style_ttk()
+        self.theme_btn.configure(text=("🌙  داكن" if self.theme_name == "light" else "☀️  فاتح"),
+                                 bg=_shade(t["head"], 1.35), fg=t["headfg"],
+                                 activebackground=_shade(t["head"], 1.5))
+        self.theme_btn._bg = _shade(t["head"], 1.35)
+        self.theme_btn._hover = _shade(t["head"], 1.5)
         self.configure(bg=t["bg"])
         self.header.configure(bg=t["head"])
+        self.accent_strip.configure(bg=t["primary"])
         self.title_lbl.configure(bg=t["head"], fg=t["headfg"])
-        self.theme_btn.configure(text="🌙 داكن" if self.theme_name == "light" else "☀️ فاتح")
+        self.sub_lbl.configure(bg=t["head"], fg=t["headmut"])
         for w in self.cred_widgets:
             try:
                 w.configure(bg=t["head"], fg=t["headfg"])
             except tk.TclError:
                 pass
+        for e in self.cred_entries:
+            e.configure(bg=t["pill"], fg=t["fg"], insertbackground=t["fg"],
+                        highlightbackground=_shade(t["head"], 1.4), highlightcolor=t["primary"])
         self.body.configure(bg=t["bg"])
+        self.footer.configure(bg=t["footer"])
+        self.footer_lbl.configure(bg=t["footer"], fg=t["footerfg"])
+        self.footer_brand.configure(bg=t["footer"], fg=t["primary"])
 
     # ---------------------------------------------------------------- البناء الأساسي
     def _build(self):
-        t = self.T
-        self.header = tk.Frame(self, height=58)
-        self.header.pack(fill="x")
-        self.title_lbl = tk.Label(self.header, text="🏛️  مركز تحكم أتمتة التراث العمراني",
-                                  font=("Arial", 15, "bold"))
-        self.title_lbl.pack(side="right", padx=14, pady=10)
-        self.theme_btn = tk.Button(self.header, text="🌙", command=self.toggle_theme,
-                                   relief="flat", font=("Arial", 10))
-        self.theme_btn.pack(side="left", padx=10)
+        # ===== الهيدر =====
+        self.header = tk.Frame(self, height=70)
+        self.header.pack(fill="x", side="top")
+        self.accent_strip = tk.Frame(self, height=3)
+        self.accent_strip.pack(fill="x", side="top")
 
-        # بيانات الدخول (تُدخل مرة، كلمة المرور لا تُحفظ)
+        titles = tk.Frame(self.header, bg=self.T["head"])
+        titles.pack(side="right", padx=16, pady=8)
+        self.title_lbl = tk.Label(titles, text="🏛️  مركز تحكم أتمتة التراث العمراني",
+                                  font=(UIFONT, 16, "bold"), anchor="e")
+        self.title_lbl.pack(side="top", anchor="e")
+        self.sub_lbl = tk.Label(titles, text="منصّة موحّدة لتشغيل ومراقبة كل الأتمتات",
+                                font=(UIFONT, 9), anchor="e")
+        self.sub_lbl.pack(side="top", anchor="e")
+
+        self.theme_btn = flat_button(self.header, "🌙", self.toggle_theme,
+                                     bg="#334155", fg="#fff", padx=12, pady=7)
+        self.theme_btn.pack(side="left", padx=12)
+
+        # بيانات الدخول (تُدخل مرة؛ كلمة المرور لا تُحفظ على القرص)
         self.cred_widgets = []
+        self.cred_entries = []
         cf = tk.Frame(self.header)
-        cf.pack(side="left", padx=6)
+        cf.pack(side="left", padx=4)
         self.cred_widgets.append(cf)
         for label, var, show in (("المستخدم", self.user_var, ""), ("المرور", self.pw_var, "•")):
-            lb = tk.Label(cf, text=label, font=("Arial", 8)); lb.pack(side="left")
-            en = tk.Entry(cf, textvariable=var, width=9, show=show, justify="center")
-            en.pack(side="left", padx=2)
+            lb = tk.Label(cf, text=label, font=(UIFONT, 8))
+            lb.pack(side="left", padx=(6, 2))
+            en = tk.Entry(cf, textvariable=var, width=10, show=show, justify="center",
+                          relief="flat", bd=0, highlightthickness=1, font=(UIFONT, 10))
+            en.pack(side="left", padx=2, ipady=3)
             self.cred_widgets.append(lb)
+            self.cred_entries.append(en)
 
+        # ===== الفوتر (حقوق دائمة على كل الشاشات) =====
+        self.footer = tk.Frame(self, height=30)
+        self.footer.pack(fill="x", side="bottom")
+        self.footer_brand = tk.Label(self.footer, text=f"  ●  v{APP_VER}",
+                                     font=(UIFONT, 8, "bold"))
+        self.footer_brand.pack(side="left", padx=8)
+        self.footer_lbl = tk.Label(self.footer, text=COPYRIGHT, font=(UIFONT, 9))
+        self.footer_lbl.pack(side="right", padx=14, pady=5)
+
+        # ===== جسم المحتوى =====
         self.body = tk.Frame(self)
-        self.body.pack(fill="both", expand=True)
+        self.body.pack(fill="both", expand=True, side="top")
 
     def creds(self):
         return self.user_var.get().strip(), self.pw_var.get().strip()
@@ -109,33 +214,73 @@ class App(tk.Tk):
         self._current = "gallery"
         self._clear_body()
         t = self.T
-        tk.Label(self.body, text="اختر الأتمتة:", bg=t["bg"], fg=t["fg"],
-                 font=("Arial", 12, "bold"), anchor="e").pack(fill="x", padx=18, pady=(10, 2))
 
-        canvas = tk.Canvas(self.body, bg=t["bg"], highlightthickness=0)
-        sb = ttk.Scrollbar(self.body, orient="vertical", command=canvas.yview)
+        head = tk.Frame(self.body, bg=t["bg"])
+        head.pack(fill="x", padx=22, pady=(16, 4))
+        tk.Label(head, text="اختر الأتمتة المطلوبة", bg=t["bg"], fg=t["fg"],
+                 font=(UIFONT, 15, "bold"), anchor="e").pack(side="right")
+        tk.Label(head, text=f"{len(self.plugins)} أتمتة متاحة", bg=t["bg"], fg=t["muted"],
+                 font=(UIFONT, 10), anchor="w").pack(side="left")
+
+        wrap = tk.Frame(self.body, bg=t["bg"])
+        wrap.pack(fill="both", expand=True, padx=12)
+        canvas = tk.Canvas(wrap, bg=t["bg"], highlightthickness=0)
+        sb = ttk.Scrollbar(wrap, orient="vertical", command=canvas.yview)
         inner = tk.Frame(canvas, bg=t["bg"])
         inner.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-        canvas.create_window((0, 0), window=inner, anchor="nw", width=880)
+        win = canvas.create_window((0, 0), window=inner, anchor="nw")
+        canvas.bind("<Configure>", lambda e: canvas.itemconfigure(win, width=e.width))
         canvas.configure(yscrollcommand=sb.set)
-        canvas.pack(side="left", fill="both", expand=True, padx=12)
+        canvas.pack(side="left", fill="both", expand=True, padx=(0, 4))
         sb.pack(side="right", fill="y")
+        canvas.bind_all("<MouseWheel>", lambda e: canvas.yview_scroll(int(-e.delta / 120), "units"))
 
         for p in self.plugins:
-            card = tk.Frame(inner, bg=t["card"], bd=0, highlightthickness=1,
-                            highlightbackground="#c9d6e3")
-            card.pack(fill="x", pady=6, padx=6)
-            top = tk.Frame(card, bg=t["card"]); top.pack(fill="x", padx=10, pady=(8, 0))
-            tk.Button(top, text="؟", width=2, font=("Arial", 9, "bold"), relief="groove",
-                      command=lambda pl=p: messagebox.showinfo(pl["title"], pl.get("help") or pl["desc"])
-                      ).pack(side="left")
-            badge = "● تحكم كامل" if p.get("supports_control") else "○ سجل حيّ"
-            tk.Label(top, text=badge, bg=t["card"], fg=t["muted"], font=("Arial", 8)).pack(side="left", padx=8)
-            tk.Button(top, text=p["title"], font=("Arial", 13, "bold"), bg=t["card"], fg=t["head"],
-                      relief="flat", anchor="e", cursor="hand2",
-                      command=lambda pl=p: self.open_plugin(pl)).pack(side="right", fill="x", expand=True)
-            tk.Label(card, text=p["desc"], bg=t["card"], fg=t["muted"], font=("Arial", 9),
-                     anchor="e", justify="right", wraplength=820).pack(fill="x", padx=12, pady=(0, 9))
+            self._gallery_card(inner, p)
+
+    def _gallery_card(self, parent, p):
+        t = self.T
+        full = p.get("supports_control")
+        accent = t["ok"] if full else t["accent"]
+
+        card = tk.Frame(parent, bg=t["card"], highlightthickness=1, highlightbackground=t["border"])
+        card.pack(fill="x", pady=7, padx=8)
+        # شريط لوني جانبي (دلالة نوع التحكم)
+        tk.Frame(card, bg=accent, width=5).pack(side="right", fill="y")
+
+        inner = tk.Frame(card, bg=t["card"])
+        inner.pack(side="right", fill="both", expand=True, padx=14, pady=12)
+
+        top = tk.Frame(inner, bg=t["card"])
+        top.pack(fill="x")
+        title = tk.Label(top, text=p["title"], font=(UIFONT, 14, "bold"), bg=t["card"],
+                         fg=t["fg"], anchor="e", cursor="hand2")
+        title.pack(side="right", fill="x", expand=True)
+        title.bind("<Button-1>", lambda e, pl=p: self.open_plugin(pl))
+
+        badge_txt = "● تحكم كامل" if full else "○ سجل حيّ"
+        badge = tk.Label(top, text=badge_txt, bg=t["pill"], fg=accent,
+                         font=(UIFONT, 8, "bold"), padx=8, pady=2)
+        badge.pack(side="left")
+        tk.Label(top, text="؟", bg=t["pill"], fg=t["muted"], font=(UIFONT, 8, "bold"),
+                 padx=7, pady=2, cursor="hand2").pack(side="left", padx=6)
+
+        tk.Label(inner, text=p["desc"], bg=t["card"], fg=t["muted"], font=(UIFONT, 10),
+                 anchor="e", justify="right", wraplength=760).pack(fill="x", pady=(6, 10))
+
+        openb = flat_button(inner, "فتح  ▸", lambda pl=p: self.open_plugin(pl),
+                            bg=t["primary"], fg="#fff", hover=t["primaryd"], padx=20, pady=7)
+        openb.pack(side="left")
+        helpb = flat_button(inner, "؟ مساعدة", lambda pl=p: messagebox.showinfo(
+            pl["title"], pl.get("help") or pl["desc"]),
+            bg=t["card"], fg=t["muted"], hover=t["pill"], border=t["border"], padx=12, pady=7)
+        helpb.pack(side="left", padx=6)
+
+        def enter(_): card.configure(highlightbackground=accent)
+        def leave(_): card.configure(highlightbackground=t["border"])
+        for w in (card, inner, top, title):
+            w.bind("<Enter>", enter)
+            w.bind("<Leave>", leave)
 
     # ---------------------------------------------------------------- شاشة الأتمتة
     def open_plugin(self, plugin):
@@ -158,18 +303,20 @@ class RunView(tk.Frame):
 
     def _build(self):
         t = self.t
-        bar = tk.Frame(self, bg=t["bg"]); bar.pack(fill="x", padx=12, pady=6)
-        tk.Button(bar, text="⬅ رجوع", command=self._back, relief="groove").pack(side="left")
-        tk.Label(bar, text=self.plugin["title"], bg=t["bg"], fg=t["head"],
-                 font=("Arial", 13, "bold"), anchor="e").pack(side="right", fill="x", expand=True)
+
+        # ---- شريط العنوان ----
+        bar = tk.Frame(self, bg=t["bg"])
+        bar.pack(fill="x", padx=16, pady=(12, 6))
+        flat_button(bar, "⬅  رجوع", self._back, bg=t["card"], fg=t["fg"],
+                    hover=t["pill"], border=t["border"], padx=14, pady=6).pack(side="left")
+        tk.Label(bar, text=self.plugin["title"], bg=t["bg"], fg=t["fg"],
+                 font=(UIFONT, 15, "bold"), anchor="e").pack(side="right", fill="x", expand=True)
 
         # ---- الإعدادات ----
-        box = tk.LabelFrame(self, text="الإعدادات", bg=t["card"], fg=t["fg"],
-                            font=("Arial", 10, "bold"), padx=10, pady=6)
-        box.pack(fill="x", padx=12, pady=4)
+        box = self._card(self, "⚙  الإعدادات")
         if self.plugin.get("self_dialogs"):
             tk.Label(box, text="هذه الأتمتة تسأل عن إعداداتها بنوافذها الخاصة عند التشغيل.",
-                     bg=t["card"], fg=t["muted"], anchor="e").pack(fill="x")
+                     bg=t["card"], fg=t["muted"], anchor="e", font=(UIFONT, 10)).pack(fill="x")
         for spec in self.plugin.get("settings", []):
             self._build_row(box, spec)
         self._apply_values(self.app.state_data.get("last", {}).get(self.plugin["id"], {}))
@@ -178,81 +325,123 @@ class RunView(tk.Frame):
             self._presets_bar(box)
 
         # ---- أزرار التحكم ----
-        ctl = tk.Frame(self, bg=t["bg"]); ctl.pack(fill="x", padx=12, pady=6)
-        self.btn_start = tk.Button(ctl, text="▶ ابدأ", bg=t["ok"], fg="white",
-                                   font=("Arial", 11, "bold"), width=10, command=self._start)
-        self.btn_pause = tk.Button(ctl, text="⏸ إيقاف مؤقت", width=12, state="disabled", command=self._pause)
-        self.btn_resume = tk.Button(ctl, text="▶ استئناف", width=10, state="disabled", command=self._resume)
-        self.btn_stop = tk.Button(ctl, text="⏹ إيقاف آمن", bg=t["err"], fg="white",
-                                  width=10, state="disabled", command=self._stop)
+        ctl = tk.Frame(self, bg=t["bg"])
+        ctl.pack(fill="x", padx=16, pady=(2, 6))
+        self.btn_start = flat_button(ctl, "▶  ابدأ", self._start, bg=t["ok"], fg="#fff",
+                                     hover=_shade(t["ok"], 0.88), padx=22, pady=9,
+                                     font=(UIFONT, 11, "bold"))
+        self.btn_pause = flat_button(ctl, "⏸  إيقاف مؤقت", self._pause, bg=t["card"], fg=t["fg"],
+                                     hover=t["pill"], border=t["border"], padx=14, pady=9)
+        self.btn_resume = flat_button(ctl, "▶  استئناف", self._resume, bg=t["card"], fg=t["fg"],
+                                      hover=t["pill"], border=t["border"], padx=14, pady=9)
+        self.btn_stop = flat_button(ctl, "⏹  إيقاف آمن", self._stop, bg=t["err"], fg="#fff",
+                                    hover=_shade(t["err"], 0.88), padx=16, pady=9)
+        self.btn_pause.configure(state="disabled")
+        self.btn_resume.configure(state="disabled")
+        self.btn_stop.configure(state="disabled")
         for b in (self.btn_start, self.btn_pause, self.btn_resume, self.btn_stop):
-            b.pack(side="right", padx=4)
+            b.pack(side="right", padx=5)
         if not self.plugin.get("supports_control"):
-            self.btn_pause.configure(text="⏸ (غير مدعوم)")
+            self.btn_pause.configure(text="⏸  (غير مدعوم)")
 
-        # ---- لوحة المراقبة (داش بورد): بطاقات مؤشرات + تقدّم + أزمنة ----
-        mon = tk.Frame(self, bg=t["bg"]); mon.pack(fill="x", padx=12, pady=(2, 4))
-        tiles = tk.Frame(mon, bg=t["bg"]); tiles.pack(fill="x")
+        # ---- الداش بورد: بطاقات مؤشرات ----
+        tiles = tk.Frame(self, bg=t["bg"])
+        tiles.pack(fill="x", padx=16, pady=(2, 4))
         self.tiles = {}
-        for key, label, color in (("total", "الكل", t["fg"]), ("done", "نجح", t["ok"]),
-                                  ("failed", "فشل", t["err"]), ("skipped", "متخطّى", t["warn"]),
-                                  ("remaining", "متبقّي", t["primary"])):
-            cell = tk.Frame(tiles, bg=t["card"], highlightthickness=1, highlightbackground="#c9d6e3")
-            cell.pack(side="right", expand=True, fill="both", padx=3)
-            val = tk.Label(cell, text="0", bg=t["card"], fg=color, font=("Arial", 20, "bold"))
-            val.pack(pady=(8, 0))
-            tk.Label(cell, text=label, bg=t["card"], fg=t["muted"], font=("Arial", 9)).pack(pady=(0, 8))
+        specs = (("total", "الإجمالي", t["primary"]), ("done", "نجح", t["ok"]),
+                 ("failed", "فشل", t["err"]), ("skipped", "تنبيه/تخطّي", t["warn"]),
+                 ("remaining", "المتبقّي", t["accent"]))
+        for key, label, color in specs:
+            cell = tk.Frame(tiles, bg=t["card"], highlightthickness=1, highlightbackground=t["border"])
+            cell.pack(side="right", expand=True, fill="both", padx=4)
+            tk.Frame(cell, bg=color, height=4).pack(fill="x")
+            val = tk.Label(cell, text="0", bg=t["card"], fg=color, font=(UIFONT, 26, "bold"))
+            val.pack(pady=(12, 2))
+            tk.Label(cell, text=label, bg=t["card"], fg=t["muted"],
+                     font=(UIFONT, 10)).pack(pady=(0, 12))
             self.tiles[key] = val
 
-        prog = tk.Frame(mon, bg=t["card"], highlightthickness=1, highlightbackground="#c9d6e3")
-        prog.pack(fill="x", pady=6)
-        head = tk.Frame(prog, bg=t["card"]); head.pack(fill="x", padx=10, pady=(8, 0))
-        self.lbl_state = tk.Label(head, text="جاهز", bg=t["card"], fg=t["muted"], font=("Arial", 11, "bold"))
+        # ---- التقدّم ----
+        prog = tk.Frame(self, bg=t["card"], highlightthickness=1, highlightbackground=t["border"])
+        prog.pack(fill="x", padx=16, pady=6)
+        head = tk.Frame(prog, bg=t["card"])
+        head.pack(fill="x", padx=14, pady=(12, 2))
+        self.lbl_state = tk.Label(head, text="● جاهز", bg=t["card"], fg=t["muted"],
+                                  font=(UIFONT, 12, "bold"))
         self.lbl_state.pack(side="right")
-        self.lbl_pct = tk.Label(head, text="0%", bg=t["card"], fg=t["primary"], font=("Arial", 15, "bold"))
+        self.lbl_pct = tk.Label(head, text="0%", bg=t["card"], fg=t["primary"],
+                                font=(UIFONT, 22, "bold"))
         self.lbl_pct.pack(side="left")
-        self.pbar = ttk.Progressbar(prog, maximum=100, value=0)
-        self.pbar.pack(fill="x", padx=10, pady=(3, 4))
-        self.lbl_extra = tk.Label(prog, text="", bg=t["card"], fg=t["muted"], font=("Arial", 9), anchor="e")
-        self.lbl_extra.pack(fill="x", padx=10, pady=(0, 8))
+        self.pbar = ttk.Progressbar(prog, maximum=100, value=0,
+                                    style="HC.Horizontal.TProgressbar")
+        self.pbar.pack(fill="x", padx=14, pady=(4, 6))
+        self.lbl_extra = tk.Label(prog, text="— بانتظار بدء التشغيل —", bg=t["card"],
+                                  fg=t["muted"], font=(UIFONT, 10), anchor="e")
+        self.lbl_extra.pack(fill="x", padx=14, pady=(0, 12))
 
         # ---- السجل الحيّ ----
-        logf = tk.Frame(self, bg=t["bg"]); logf.pack(fill="both", expand=True, padx=12, pady=(2, 10))
-        self.log = tk.Text(logf, bg=t["logbg"], fg=t["logfg"], font=("Consolas", 9),
-                           wrap="word", height=12, state="disabled")
+        logcard = tk.Frame(self, bg=t["card"], highlightthickness=1, highlightbackground=t["border"])
+        logcard.pack(fill="both", expand=True, padx=16, pady=(2, 12))
+        tk.Label(logcard, text="📜  السجل الحيّ", bg=t["card"], fg=t["fg"],
+                 font=(UIFONT, 10, "bold"), anchor="e").pack(fill="x", padx=12, pady=(8, 2))
+        logf = tk.Frame(logcard, bg=t["card"])
+        logf.pack(fill="both", expand=True, padx=8, pady=(0, 8))
+        self.log = tk.Text(logf, bg=t["logbg"], fg=t["logfg"], font=(MONO, 10),
+                           wrap="word", height=10, state="disabled", relief="flat", bd=0,
+                           padx=10, pady=8, insertbackground=t["logfg"])
         sb = ttk.Scrollbar(logf, command=self.log.yview)
         self.log.configure(yscrollcommand=sb.set)
-        sb.pack(side="right", fill="y"); self.log.pack(side="right", fill="both", expand=True)
+        sb.pack(side="right", fill="y")
+        self.log.pack(side="right", fill="both", expand=True)
         for lvl, key in LEVEL_COLORS.items():
             self.log.tag_configure(lvl, foreground=self.t.get(key, self.t["logfg"]))
 
-    # ---- بناء الحقول (مثل باني الإعدادات) ----
+    # ---- بطاقة بعنوان ----
+    def _card(self, parent, title):
+        t = self.t
+        outer = tk.Frame(parent, bg=t["card"], highlightthickness=1, highlightbackground=t["border"])
+        outer.pack(fill="x", padx=16, pady=6)
+        tk.Label(outer, text=title, bg=t["card"], fg=t["fg"],
+                 font=(UIFONT, 11, "bold"), anchor="e").pack(fill="x", padx=12, pady=(10, 2))
+        inner = tk.Frame(outer, bg=t["card"])
+        inner.pack(fill="x", padx=12, pady=(0, 10))
+        return inner
+
+    # ---- بناء الحقول ----
     def _build_row(self, parent, spec):
         t = self.t
         name, typ = spec["name"], spec["type"]
-        row = tk.Frame(parent, bg=t["card"]); row.pack(fill="x", pady=3)
-        lbl = tk.Label(row, text=spec["label"], bg=t["card"], fg=t["fg"], width=32,
-                       anchor="e", justify="right")
+        row = tk.Frame(parent, bg=t["card"])
+        row.pack(fill="x", pady=4)
+        lbl = tk.Label(row, text=spec["label"], bg=t["card"], fg=t["fg"], width=30,
+                       anchor="e", justify="right", font=(UIFONT, 10))
         lbl.pack(side="right")
         if typ == "bool":
             var = tk.BooleanVar(value=spec.get("default", False))
-            w = tk.Checkbutton(row, variable=var, bg=t["card"])
+            w = tk.Checkbutton(row, variable=var, bg=t["card"], activebackground=t["card"])
         elif typ == "choice":
             var = tk.StringVar(value=spec.get("default", spec["choices"][0]))
             w = ttk.Combobox(row, textvariable=var, values=spec["choices"], state="readonly", width=26)
             var.trace_add("write", lambda *a: self._refresh_conditional())
         elif typ == "textarea":
-            var = tk.Text(row, height=4, width=28); w = var
+            var = tk.Text(row, height=4, width=28, relief="flat", bd=0,
+                          highlightthickness=1, highlightbackground=t["border"])
+            w = var
         elif typ in ("folder", "savefile"):
             var = tk.StringVar()
             inner = tk.Frame(row, bg=t["card"])
-            tk.Entry(inner, textvariable=var, width=20, justify="right").pack(side="right")
-            tk.Button(inner, text="…", width=3, command=lambda s=spec, v=var: self._pick(s, v)).pack(side="right", padx=3)
+            tk.Entry(inner, textvariable=var, width=22, justify="right", relief="flat", bd=0,
+                     highlightthickness=1, highlightbackground=t["border"],
+                     font=(UIFONT, 10)).pack(side="right", ipady=3)
+            flat_button(inner, "…", lambda s=spec, v=var: self._pick(s, v),
+                        bg=t["primary"], fg="#fff", hover=t["primaryd"],
+                        padx=10, pady=4).pack(side="right", padx=4)
             w = inner
         else:
             var = tk.StringVar(value=str(spec.get("default", "")))
-            w = tk.Entry(row, textvariable=var, width=28, justify="right")
-        w.pack(side="right", padx=6)
+            w = tk.Entry(row, textvariable=var, width=28, justify="right", relief="flat", bd=0,
+                         highlightthickness=1, highlightbackground=t["border"], font=(UIFONT, 10))
+        w.pack(side="right", padx=8, ipady=2)
         self.vars[name] = var
         self.rows[name] = row
 
@@ -294,19 +483,23 @@ class RunView(tk.Frame):
                 continue
             show = self._value(cond["field"]) in cond["equals"]
             row = self.rows[spec["name"]]
-            row.pack(fill="x", pady=3) if show else row.pack_forget()
+            row.pack(fill="x", pady=4) if show else row.pack_forget()
 
     def _presets_bar(self, parent):
         t = self.t
-        bar = tk.Frame(parent, bg=t["card"]); bar.pack(fill="x", pady=(4, 0))
-        tk.Label(bar, text="إعداد محفوظ:", bg=t["card"], fg=t["muted"], anchor="e").pack(side="right")
+        bar = tk.Frame(parent, bg=t["card"])
+        bar.pack(fill="x", pady=(8, 0))
+        tk.Label(bar, text="إعداد محفوظ:", bg=t["card"], fg=t["muted"],
+                 anchor="e", font=(UIFONT, 10)).pack(side="right")
         self._preset_var = tk.StringVar()
         names = sorted(self.app.state_data.get("presets", {}).get(self.plugin["id"], {}).keys())
         self._preset_cb = ttk.Combobox(bar, textvariable=self._preset_var, values=names,
                                        state="readonly", width=16)
         self._preset_cb.pack(side="right", padx=4)
-        tk.Button(bar, text="حمّل", width=5, command=self._load_preset).pack(side="right", padx=2)
-        tk.Button(bar, text="احفظ", width=6, command=self._save_preset).pack(side="right", padx=2)
+        flat_button(bar, "حمّل", self._load_preset, bg=t["card"], fg=t["fg"],
+                    hover=t["pill"], border=t["border"], padx=10, pady=4).pack(side="right", padx=2)
+        flat_button(bar, "احفظ", self._save_preset, bg=t["card"], fg=t["fg"],
+                    hover=t["pill"], border=t["border"], padx=10, pady=4).pack(side="right", padx=2)
 
     def _load_preset(self):
         p = self.app.state_data.get("presets", {}).get(self.plugin["id"], {}).get(self._preset_var.get())
@@ -327,7 +520,6 @@ class RunView(tk.Frame):
         self.log.configure(state="normal")
         tag = level if level in LEVEL_COLORS else "info"
         self.log.insert("end", msg + "\n", tag)
-        # نحدّ طول السجل
         if int(self.log.index("end-1c").split(".")[0]) > 1500:
             self.log.delete("1.0", "500.0")
         self.log.see("end")
@@ -335,7 +527,6 @@ class RunView(tk.Frame):
 
     # ---- التشغيل والتحكم ----
     def _start(self):
-        # نحفظ آخر القيم
         self.app.state_data.setdefault("last", {})[self.plugin["id"]] = self._collect()
         self.app.state_data["username"] = self.app.creds()[0]
         state_mod.save(self.app.state_data)
@@ -375,7 +566,7 @@ class RunView(tk.Frame):
         else:
             self.runner.stop()
         self.btn_stop.configure(state="disabled")
-        self.lbl_state.configure(text="جاري الإيقاف الآمن…")
+        self.lbl_state.configure(text="⏹ جاري الإيقاف الآمن…")
 
     def _poll(self):
         if not self._polling:
@@ -394,6 +585,7 @@ class RunView(tk.Frame):
             self._polling = False
 
     def _update_monitor(self):
+        t = self.t
         s = self.runner.stats
         rem = self.runner.remaining()
         self.pbar.configure(value=s["percent"])
@@ -401,27 +593,31 @@ class RunView(tk.Frame):
         vals = {"total": s["total"], "done": s["done"], "failed": s["failed"],
                 "skipped": s["skipped"], "remaining": rem}
         for k, lbl in self.tiles.items():
-            lbl.configure(text=str(vals[k]))
+            lbl.configure(text=f"{vals[k]:,}")
 
         def fmt(x):
             x = int(x)
-            return f"{x // 60}:{x % 60:02d}"
+            h, rem2 = divmod(x, 3600)
+            m, sec = divmod(rem2, 60)
+            return f"{h}:{m:02d}:{sec:02d}" if h else f"{m}:{sec:02d}"
 
         el = s["elapsed"]
         eta = int(s["avg"] * rem) if (s["avg"] and rem) else 0
         self.lbl_extra.configure(
-            text=f"الموقع الحالي: {s['current'] or '—'}    |    متوسط الموقع: {s['avg']:.1f}ث"
-                 f"    |    مضى: {fmt(el)}    |    متبقّي ≈ {fmt(eta)}")
-        names = {"running": "▶ شغّال", "paused": "⏸ متوقّف مؤقتاً", "stopping": "⏹ جاري الإيقاف",
-                 "stopped": "⏹ أُوقف", "finished": "✅ انتهى", "idle": "جاهز"}
-        self.lbl_state.configure(text=names.get(s["state"], s["state"]))
+            text=f"الموقع الحالي: {s['current'] or '—'}      "
+                 f"متوسط الموقع: {s['avg']:.1f}ث      مضى: {fmt(el)}      متبقٍّ ≈ {fmt(eta)}")
+        states = {"running": ("● شغّال", t["ok"]), "paused": ("⏸ متوقّف مؤقتاً", t["warn"]),
+                  "stopping": ("⏹ جاري الإيقاف", t["warn"]), "stopped": ("⏹ أُوقف", t["err"]),
+                  "finished": ("✅ انتهى", t["ok"]), "idle": ("● جاهز", t["muted"])}
+        txt, col = states.get(s["state"], (s["state"], t["muted"]))
+        self.lbl_state.configure(text=txt, fg=col)
 
     def _on_finish(self, ev):
         self._update_monitor()
         self.btn_start.configure(state="normal")
         for b in (self.btn_pause, self.btn_resume, self.btn_stop):
             b.configure(state="disabled")
-        msg = "✅ انتهى التشغيل" if ev["state"] == "finished" else "⏹ تم الإيقاف"
+        msg = "✅ انتهى التشغيل بنجاح" if ev["state"] == "finished" else "⏹ تم الإيقاف — التقدّم محفوظ ويمكن الاستئناف"
         self._append_log(msg, "ok" if ev["state"] == "finished" else "warn")
         self.runner.cleanup()
 

@@ -3,7 +3,23 @@
 """مشروع التراث العمراني — تصدير ملفات المواقع والصور.
 حوّل من Notebook إلى برنامج طرفية قابل للاستئناف.
 """
-import asyncio, os, re, time, json, argparse, getpass, tempfile
+import asyncio, os, re, time, json, argparse, getpass, tempfile, sys
+
+# جسر مركز التحكم (اختياري): يبعث التقدّم ويحترم الإيقاف/الاستئناف.
+# لو شُغّل السكربت وحده (بدون المركز) يتحوّل إلى صامت/ممرّر فلا يتأثر السلوك.
+try:
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from agent_runtime import R as _R
+except Exception:
+    class _NoR:
+        enabled = False
+        def total(self, *a, **k): pass
+        def progress(self, *a, **k): pass
+        def log(self, *a, **k): pass
+        def done(self, *a, **k): pass
+        def should_stop(self): return False
+        def wait_if_paused(self): return True
+    _R = _NoR()
 
 try:
     import tkinter as tk
@@ -882,6 +898,10 @@ async def run_automation(buildings: list, dirs: dict, progress: dict):
         done_ids = {str(x) for x in progress['completed']}
     pending  = [b for b in buildings if str(b['id']) not in done_ids]
 
+    # تهيئة الداش بورد في مركز التحكم: الكل = كل المباني المحددة، المكتمل = ما تحقق مسبقاً.
+    _R.total(len(buildings))
+    _R.progress(done=len(done_ids), failed=len(progress.get('failed', [])), current="")
+
     print(f"\n{'='*55}")
     print("  🚀 بدء الأتمتة")
     print(f"  📦 إجمالي: {len(buildings):,} | ✅ مكتمل: {len(done_ids):,} | ⏳ متبقي: {len(pending):,}")
@@ -932,10 +952,18 @@ async def run_automation(buildings: list, dirs: dict, progress: dict):
         pbar = tqdm(pending, desc="المباني", unit="مبنى")
         successful_since_excel = 0
 
+        stopped = False
         for building in pbar:
+            # نقطة آمنة: نحترم الإيقاف المؤقت/الآمن قبل البدء بأي موقع (ليس وسط حفظ).
+            if not _R.wait_if_paused() or _R.should_stop():
+                _R.log("⏹ إيقاف آمن بطلب المستخدم — حُفظ التقدّم.")
+                print("\n⏹ تم الإيقاف الآمن بطلب المستخدم؛ التقدّم محفوظ ويمكن الاستئناف لاحقاً.")
+                stopped = True
+                break
             bid   = str(building['id'])
             bname = artifact_stem(building)
             pbar.set_postfix_str(f"{bname[:35]}")
+            _R.progress(current=f"{bname[:40]}")
             errors = []
             warnings = []
 
@@ -1021,6 +1049,12 @@ async def run_automation(buildings: list, dirs: dict, progress: dict):
 
             save_progress(PROGRESS_FILE, progress)
 
+            # تحديث الداش بورد الحيّ في مركز التحكم
+            _R.progress(done=len(progress['completed']),
+                        failed=len(progress['failed']),
+                        skipped=len(progress.get('warned', {})),
+                        current=f"{bname[:40]}")
+
             # ── تحديث Excel ──
             if not errors and successful_since_excel >= 25:
                 completed_list = [b for b in buildings if b['id'] in set(progress['completed'])]
@@ -1042,6 +1076,7 @@ async def run_automation(buildings: list, dirs: dict, progress: dict):
         excel_path = "تعذر تحديثه لأن الملف مفتوح؛ أغلق Excel وأعد تشغيل البرنامج"
 
     warned = progress.get('warned', {})
+    _R.done(ok=len(progress['completed']), failed=len(progress['failed']), skipped=len(warned))
     print(f"\n{'='*55}")
     print("  🎉 اكتملت العملية!")
     print(f"  ✅ مكتمل : {len(progress['completed']):,}")

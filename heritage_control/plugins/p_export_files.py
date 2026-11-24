@@ -6,7 +6,7 @@ PLUGIN = {
     "help": "اكتب رقم القرار واختر مجلد الحفظ (إجباري). يحتاج متصفح Playwright (chromium). قابل "
             "للاستئناف ويعيد الفاشل.",
     "script": "export_files.py",
-    "supports_control": False, "emits_progress": False,
+    "supports_control": True, "emits_progress": True,
     "settings": [
         {"name": "decision", "label": "رقم قرار التسجيل", "type": "text", "arg": "--decision", "required": True},
         {"name": "output", "label": "مجلد الحفظ", "type": "folder", "arg": "--output", "required": True},

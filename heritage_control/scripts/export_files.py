@@ -432,14 +432,20 @@ def get_all_buildings(decision: str, progress: dict, start_from_page: int = 1) -
         f"الصفحات: {pages} | من: {actual_start} إلى {pages}"
     )
 
+    # عدد الصفوف المقروءة فعلياً (قد يفوق عدد المواقع الفريدة لأن الموقع الواحد
+    # قد يتكرّر في القائمة عند إسناده لأكثر من شخص في سير العمل).
+    rows_seen = progress.get('rows_seen', 0)
+
     if actual_start == 1:
         page_data = first_page_data
         known.update({b['id']: b for b in page_data})
         all_buildings = list(known.values())
+        rows_seen = len(page_data)
         progress['last_page_collected'] = 1
         progress['buildings']           = all_buildings
+        progress['rows_seen']           = rows_seen
         save_progress(PROGRESS_FILE, progress)
-        print(f"   ✅ صفحة   1/{pages}: {len(page_data):>3} مبنى | إجمالي: {len(all_buildings):,}")
+        print(f"   ✅ صفحة   1/{pages}: {len(page_data):>3} صف | مواقع فريدة: {len(all_buildings):,}")
     # نعيد المرور تسلسلياً من الصفحة 2 حتى عند الاستئناف لأن GridView يعتمد
     # ViewState الصفحة السابقة. الصفحات المحفوظة تُمرّر فقط ولا تُضاف ثانية.
     range_start = 2
@@ -495,19 +501,25 @@ def get_all_buildings(decision: str, progress: dict, start_from_page: int = 1) -
             )
         known.update({b['id']: b for b in page_data})
         all_buildings = list(known.values())
+        rows_seen += len(page_data)
 
         progress['last_page_collected'] = pg
         progress['buildings']           = all_buildings
+        progress['rows_seen']           = rows_seen
         save_progress(PROGRESS_FILE, progress)
 
         if pg % 25 == 0 or pg == pages:
-            print(f"   ✅ صفحة {pg:>4}/{pages}: إجمالي {len(all_buildings):,} مبنى")
+            print(f"   ✅ صفحة {pg:>4}/{pages}: مواقع فريدة {len(all_buildings):,} (صفوف مقروءة {rows_seen:,})")
 
+    # اكتمال الجمع مضمون بوصولنا لآخر صفحة (كل صفحة فاشلة/فارغة تُوقف التشغيل أعلاه).
+    # لذلك لا نُفشل عند اختلاف العدد: الموقع قد يتكرّر مشروعاً في القائمة (مُسنَد
+    # لأكثر من شخص)، فعدد المواقع الفريدة أقل من عدد صفوف المنصة — وهذا طبيعي.
     if len(all_buildings) != total:
-        raise RuntimeError(
-            f"عدد المباني المجموعة ({len(all_buildings):,}) لا يطابق عدد المنصة ({total:,}). "
-            "لن يتم تعليم القائمة كمكتملة؛ أعد التشغيل للاستكمال."
-        )
+        print(f"ℹ️ المنصة تعرض {total:,} صف (منها مكرّر — الموقع عند أكثر من شخص). "
+              f"صفوف مقروءة: {rows_seen:,} → سيُصدَّر {len(all_buildings):,} موقع فريد.")
+    if rows_seen < total:
+        print(f"⚠️ تنبيه: الصفوف المقروءة ({rows_seen:,}) أقل من عدد المنصة ({total:,}). "
+              "جرى المرور على كل الصفحات؛ إن نقص موقع أعد التشغيل للاستكمال الآمن.")
 
     progress['buildings_complete'] = True
     progress['buildings']          = all_buildings

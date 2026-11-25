@@ -2,23 +2,21 @@
 """
 🏛️ أتمتة الإحداثيات (بدون كروكي) — إدخال X / Y / المساحة من ملف Excel مباشرة.
 
-الفكرة: ترفع ملف Excel فيه عمود «Site ID» + «خط الطول X» + «خط العرض Y»
-(و«المساحة» اختياري)، فيدخل لكل موقع بصفحته على المنصة ويكتب إحداثياته ويحفظ —
-بدون رفع صورة كروكي وبدون مطابقة بالاسم (المطابقة برقم الموقع مباشرة = الأدق).
+ترفع ملف Excel فيه «اسم الموقع» + «خط الطول X» + «خط العرض Y» (و«المساحة» اختياري)،
+وتُدخل رقم القرار. تبحث المنصة بالقرار، تجمع مبانيه (رقم+اسم)، تُطابق كل اسم في
+الإكسل بأقرب مبنى على المنصة، ثم تكتب إحداثياته وتحفظ — بدون كروكي.
 
-يكتب فعلياً على المنصة (صفحة استكمال بيانات الميدان / DataEdit/<id>/2)، فيُنصح
-بتجربته على عدد محدود أولاً عبر خيار «الحد».
-
-يعمل مستقلاً أو عبر مركز التحكم (يبعث التقدّم ويحترم الإيقاف/الاستئناف).
+⚠️ يكتب فعلياً على المنصة (DataEdit/<id>/2). جرّب على عدد محدود أولاً عبر «الحد»،
+وراجع نسبة التطابق قبل التوسّع. يعمل مستقلاً أو عبر مركز التحكم.
 """
 import os
+import re
 import sys
 import time
 import json
 import argparse
 import subprocess
 
-# جسر مركز التحكم (اختياري)
 try:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from agent_runtime import R as _R
@@ -48,10 +46,12 @@ except ImportError as exc:
 
 BASE = 'https://heritage2.itqan-consultant.com'
 INBOX = f'{BASE}/Web/App/Home/Inbox'
-
-# أسماء حقول الإحداثيات في صفحة استكمال بيانات الميدان (مثبتة من أتمتة الكروكي)
 F_X, F_Y, F_AREA = 'ctl37$Field1$ctl03', 'ctl38$Field1$ctl03', 'ctl39$Field1$ctl03'
 SAVE_BTN = "//input[@name='ctl12$btnSave']"
+MATCH_THRESHOLD = 0.72
+
+driver = None
+wait = None
 
 
 # ───────────────────────── قراءة Excel ─────────────────────────
@@ -65,7 +65,6 @@ def _find_col(headers, *keys):
 
 
 def num_str(v):
-    """تحويل الرقم لنص نظيف (بلا صيغة علمية، بلا أصفار زائدة)."""
     if v is None:
         return ''
     s = str(v).strip()
@@ -75,50 +74,68 @@ def num_str(v):
         f = float(s)
     except ValueError:
         return s
-    out = f"{f:.6f}".rstrip('0').rstrip('.')
-    return out
+    return f"{f:.6f}".rstrip('0').rstrip('.')
 
 
 def read_rows(path):
-    wb = openpyxl.load_workbook(path, data_only=True)
-    ws = wb.active
+    ws = openpyxl.load_workbook(path, data_only=True).active
     headers = [ws.cell(1, c).value for c in range(1, ws.max_column + 1)]
-    ci_id = _find_col(headers, 'site id', 'siteid', 'رقم الموقع', 'معرف', 'id')
+    ci_name = _find_col(headers, 'اسم الموقع', 'اسم المبنى', 'الاسم', 'name')
     ci_x = _find_col(headers, 'خط الطول', 'الطول', 'longitude', ' x', 'x ')
     ci_y = _find_col(headers, 'خط العرض', 'العرض', 'latitude', ' y', 'y ')
     ci_area = _find_col(headers, 'مساحة', 'المساحة', 'area')
-    ci_name = _find_col(headers, 'اسم الموقع', 'الاسم', 'name')
-    if ci_id is None or ci_x is None or ci_y is None:
+    ci_id = _find_col(headers, 'site id', 'siteid', 'معرف')
+    if ci_name is None or ci_x is None or ci_y is None:
         raise SystemExit(
-            "تعذّر العثور على الأعمدة المطلوبة. لازم يحتوي الملف على:\n"
-            "  • عمود رقم الموقع (Site ID)\n"
-            "  • عمود «خط الطول X»\n"
-            "  • عمود «خط العرض Y»\n"
+            "لازم يحتوي الملف على: «اسم الموقع» + «خط الطول X» + «خط العرض Y».\n"
             f"الأعمدة الموجودة: {headers}"
         )
     rows = []
     for r in range(2, ws.max_row + 1):
-        sid = ws.cell(r, ci_id + 1).value
+        name = ws.cell(r, ci_name + 1).value
         x = num_str(ws.cell(r, ci_x + 1).value)
         y = num_str(ws.cell(r, ci_y + 1).value)
         area = num_str(ws.cell(r, ci_area + 1).value) if ci_area is not None else ''
-        name = ws.cell(r, ci_name + 1).value if ci_name is not None else ''
-        if sid is None or not str(sid).strip():
+        tag = ws.cell(r, ci_id + 1).value if ci_id is not None else ''
+        if not name or not str(name).strip() or not (x and y):
             continue
-        sid = str(sid).strip()
-        if sid.endswith('.0'):
-            sid = sid[:-2]
-        if not (x and y):
-            continue
-        rows.append({'id': sid, 'x': x, 'y': y, 'area': area, 'name': str(name or '')})
+        rows.append({'name': str(name).strip(), 'x': x, 'y': y, 'area': area,
+                     'tag': str(tag or '').strip()})
     return rows
 
 
+# ───────────────────────── مطابقة الأسماء ─────────────────────────
+def normalize_name(s):
+    s = str(s).strip()
+    s = re.sub(r'[\u064b-\u0652]', '', s)
+    s = s.replace('أ', 'ا').replace('إ', 'ا').replace('آ', 'ا')
+    s = s.replace('ة', 'ه').replace('ى', 'ي')
+    for w in ['التاريخيه', 'التاريخي', 'قريه', 'قرية', 'موقع', 'منطقه', 'منطقة', 'حي']:
+        s = s.replace(w, '')
+    s = s.replace('ـ', '')
+    return re.sub(r'\s+', '', s).strip()
+
+
+def name_similarity(a, b):
+    from difflib import SequenceMatcher
+    na, nb = normalize_name(a), normalize_name(b)
+    if not na or not nb:
+        return 0.0
+    return SequenceMatcher(None, na, nb).ratio()
+
+
+def best_match(name, buildings, used):
+    best, best_sc = None, 0.0
+    for b in buildings:
+        if b['id'] in used:
+            continue
+        sc = name_similarity(name, b['name'])
+        if sc > best_sc:
+            best_sc, best = sc, b
+    return (best, best_sc) if (best and best_sc >= MATCH_THRESHOLD) else (None, best_sc)
+
+
 # ───────────────────────── المتصفح ─────────────────────────
-driver = None
-wait = None
-
-
 def launch_chrome():
     global driver, wait
     chrome_paths = [
@@ -146,13 +163,12 @@ def launch_chrome():
 
 
 def wait_for_login(max_wait=600):
-    """ينتظر تسجيل الدخول اليدوي في نافذة Chrome (آمن مع مركز التحكم — بلا input)."""
     driver.get(INBOX); time.sleep(3)
     deadline = time.time() + max_wait
     warned = False
     while ('Login' in (driver.current_url or '') or driver.title == 'Runtime Error'):
         if not warned:
-            print('👤 سجّل دخولك الآن في نافذة Chrome المفتوحة — سأكمل تلقائياً بعد الدخول…')
+            print('👤 سجّل دخولك الآن في نافذة Chrome — سأكمل تلقائياً بعد الدخول…')
             _R.log('بانتظار تسجيل الدخول في نافذة Chrome…', 'warn')
             warned = True
         try:
@@ -166,10 +182,67 @@ def wait_for_login(max_wait=600):
     _R.log('تم تسجيل الدخول', 'ok')
 
 
+def js_set(name, value):
+    el = driver.find_element('xpath', f"//input[@name='{name}']")
+    driver.execute_script("""
+        var el=arguments[0],val=arguments[1];
+        el.value=val;
+        el.dispatchEvent(new Event('input',{bubbles:true}));
+        el.dispatchEvent(new Event('change',{bubbles:true}));
+    """, el, value)
+
+
 def js_click(el):
     driver.execute_script("arguments[0].scrollIntoView({block:'center'});", el)
     time.sleep(0.3)
     driver.execute_script("arguments[0].click();", el)
+
+
+def collect_platform_buildings(decision):
+    """يبحث المنصة برقم القرار ويجمع كل المباني (id + name) عبر الصفحات."""
+    driver.get(INBOX); time.sleep(3)
+    try:
+        js_set('ctl12$ctl28', str(decision))
+        time.sleep(0.3)
+        js_click(driver.find_element('xpath', "//input[@name='ctl12$btnSearch']"))
+        time.sleep(3)
+    except Exception as e:
+        print(f'⚠️ تعذّر إرسال البحث: {str(e)[:60]}')
+    buildings, seen, page = [], set(), 1
+    while True:
+        time.sleep(2)
+        for row in driver.find_elements('xpath', "//table//tr[.//a[@href]]"):
+            try:
+                link = ''
+                for a in row.find_elements('xpath', './/a[@href]'):
+                    href = a.get_attribute('href') or ''
+                    if 'DataEdit/' in href:
+                        link = href
+                        name = (a.text or '').strip()
+                        break
+                m = re.search(r'DataEdit/(\d+)', link)
+                if not m:
+                    continue
+                bid = m.group(1)
+                if bid in seen:
+                    continue
+                if not name or not re.search(r'[\u0600-\u06FFA-Za-z]', name):
+                    # الاسم في خلية ثانية
+                    for a in row.find_elements('xpath', './/a[@href]'):
+                        at = (a.text or '').strip()
+                        if at and re.search(r'[\u0600-\u06FF]', at):
+                            name = at; break
+                seen.add(bid)
+                buildings.append({'id': bid, 'name': name})
+            except Exception:
+                continue
+        nxt = driver.find_elements('xpath',
+            f"//table//tr//td//a[text()='{page+1}'] | //a[contains(@href,'Page${page+1}')]")
+        if nxt:
+            js_click(nxt[0]); page += 1
+        else:
+            break
+    return buildings
 
 
 def fill_field(name_contains, value):
@@ -177,7 +250,7 @@ def fill_field(name_contains, value):
         inp = driver.find_element('xpath', f"//input[contains(@name,'{name_contains}')]")
         clean = str(value).replace('\n', '').replace('\r', '').strip()
         driver.execute_script("""
-            var el=arguments[0], val=arguments[1];
+            var el=arguments[0],val=arguments[1];
             el.focus(); el.value=''; el.value=val;
             el.dispatchEvent(new Event('input',{bubbles:true}));
             el.dispatchEvent(new Event('change',{bubbles:true}));
@@ -204,14 +277,13 @@ def get_val(name_contains, timeout=15):
     return ''
 
 
-def process_site(row):
-    """يكتب X/Y/المساحة لموقع واحد ويحفظ ويتحقق. يرجّع True عند النجاح."""
-    url = f'{BASE}/Web/App/Pools/DataEdit/{row["id"]}/2'
+def write_coords(bid, x, y, area):
+    url = f'{BASE}/Web/App/Pools/DataEdit/{bid}/2'
     for attempt in range(2):
         driver.get(url); time.sleep(3)
-        fields = [(F_X, row['x']), (F_Y, row['y'])]
-        if row['area']:
-            fields.append((F_AREA, row['area']))
+        fields = [(F_X, x), (F_Y, y)]
+        if area:
+            fields.append((F_AREA, area))
         for fname, fval in fields:
             for _ in range(4):
                 if fill_field(fname, fval):
@@ -224,29 +296,28 @@ def process_site(row):
         except Exception as e:
             print(f'   ❌ حفظ: {str(e)[:50]}')
             continue
-        # تحقّق
         driver.get(url); time.sleep(2)
         cx, cy = get_val(F_X), get_val(F_Y)
         try:
-            if abs(float(cx) - float(row['x'])) < 0.0001 and abs(float(cy) - float(row['y'])) < 0.0001:
+            if abs(float(cx) - float(x)) < 0.0001 and abs(float(cy) - float(y)) < 0.0001:
                 return True
         except ValueError:
             pass
-        print(f'   🔁 تحقق فشل (X={cx}, Y={cy}) — إعادة محاولة' if attempt == 0 else '')
+        if attempt == 0:
+            print(f'   🔁 تحقق فشل (X={cx}, Y={cy}) — إعادة محاولة')
     return False
 
 
 def main():
-    ap = argparse.ArgumentParser(description='إدخال إحداثيات من Excel بدون كروكي')
+    ap = argparse.ArgumentParser(description='إدخال إحداثيات من Excel بالمطابقة بالاسم')
     ap.add_argument('--excel', default=os.environ.get('HERITAGE_COORDS_EXCEL', ''))
+    ap.add_argument('--decision', default=os.environ.get('HERITAGE_DECISION', ''))
     ap.add_argument('--output', default=os.environ.get('HERITAGE_OUTPUT', '') or 'CoordsRun')
-    ap.add_argument('--limit', type=int,
-                    default=int(os.environ.get('HERITAGE_COORDS_LIMIT') or 0))
+    ap.add_argument('--limit', type=int, default=int(os.environ.get('HERITAGE_COORDS_LIMIT') or 0))
     args = ap.parse_args()
 
     excel = (args.excel or '').strip()
-    if not excel or not os.path.isfile(excel):
-        # لو مُرِّر مجلد، نبحث عن أول Excel فيه
+    if (not excel or not os.path.isfile(excel)):
         folder = os.environ.get('HERITAGE_FOLDER', '').strip()
         if folder and os.path.isdir(folder):
             cands = [f for f in os.listdir(folder)
@@ -254,14 +325,17 @@ def main():
             if cands:
                 excel = os.path.join(folder, cands[0])
     if not excel or not os.path.isfile(excel):
-        raise SystemExit('❌ حدّد ملف الإحداثيات (Excel) — لم يُعثر على ملف صالح.')
+        raise SystemExit('❌ حدّد ملف الإحداثيات (Excel).')
+    decision = (args.decision or '').strip()
+    if not decision:
+        raise SystemExit('❌ أدخل رقم قرار التسجيل — لازم لتحديد نطاق المطابقة على المنصة.')
 
     rows = read_rows(excel)
     if args.limit and args.limit > 0:
         rows = rows[:args.limit]
     print(f'📄 ملف الإحداثيات: {excel}')
-    print(f'📊 عدد المواقع للإدخال: {len(rows)}')
-    print('✍️ تنبيه: هذه العملية تكتب فعلياً على المنصة (إحداثيات + مساحة).')
+    print(f'📋 رقم القرار: {decision} | عدد المواقع: {len(rows)}')
+    print('✍️ تنبيه: تكتب فعلياً على المنصة (إحداثيات + مساحة).')
 
     out_dir = os.path.abspath(args.output)
     os.makedirs(out_dir, exist_ok=True)
@@ -270,8 +344,6 @@ def main():
         done = set(json.load(open(ckpt, encoding='utf-8')).get('done', []))
     except Exception:
         done = set()
-    if done:
-        print(f'📌 استئناف: {len(done)} موقع مُدخل سابقاً — سيُتخطّى.')
 
     _R.total(len(rows))
     _R.progress(done=len(done))
@@ -279,45 +351,69 @@ def main():
     launch_chrome()
     wait_for_login()
 
+    print('🔎 جمع مباني القرار من المنصة للمطابقة…')
+    _R.log('جاري جمع مباني القرار للمطابقة…', 'info')
+    platform = collect_platform_buildings(decision)
+    print(f'🏢 مباني المنصة: {len(platform)}')
+    _R.log(f'مباني المنصة: {len(platform)}', 'info')
+    if not platform:
+        raise SystemExit('❌ لم تُجمع مباني من المنصة لهذا القرار — تأكد من الرقم وتسجيل الدخول.')
+
     ok = fail = skip = 0
-    results = []
+    used = set()
+    report = []   # (اسم الإكسل، اسم المنصة، النسبة، الحالة)
     for i, row in enumerate(rows, 1):
         if not _R.wait_if_paused() or _R.should_stop():
-            print('⏹ إيقاف آمن — التقدّم محفوظ.')
-            break
-        _R.progress(current=f'{row["id"]} {row["name"][:28]}')
-        if row['id'] in done:
+            print('⏹ إيقاف آمن — التقدّم محفوظ.'); break
+        key = row['tag'] or row['name']
+        _R.progress(current=row['name'][:30])
+        if key in done:
             skip += 1
-            _R.progress(skipped=skip, current=row['id'])
-            continue
-        print(f'\n[{i}/{len(rows)}] موقع {row["id"]}  ({row["name"][:30]})  X={row["x"]} Y={row["y"]}'
-              + (f' مساحة={row["area"]}' if row['area'] else ''))
+            _R.progress(skipped=skip); continue
+
+        match, score = best_match(row['name'], platform, used)
+        if not match:
+            fail += 1
+            report.append((row['name'], '—', score, 'لا تطابق'))
+            print(f"[{i}/{len(rows)}] ❌ «{row['name'][:30]}» أفضل تشابه {score:.0%} — أقل من الحد")
+            _R.log(f"لا تطابق: {row['name'][:30]} ({score:.0%})", 'warn')
+            _R.progress(failed=fail); continue
+        used.add(match['id'])
+        print(f"\n[{i}/{len(rows)}] «{row['name'][:28]}» → «{match['name'][:28]}» ({score:.0%}) "
+              f"[{match['id']}]  X={row['x']} Y={row['y']}" + (f" م={row['area']}" if row['area'] else ''))
         try:
-            good = process_site(row)
+            good = write_coords(match['id'], row['x'], row['y'], row['area'])
         except Exception as e:
-            good = False
-            print(f'   ❌ خطأ: {str(e)[:60]}')
+            good = False; print(f'   ❌ {str(e)[:60]}')
         if good:
-            ok += 1
-            done.add(row['id'])
+            ok += 1; done.add(key)
             try:
                 json.dump({'done': sorted(done)}, open(ckpt, 'w', encoding='utf-8'), ensure_ascii=False)
             except Exception:
                 pass
-            print('   ✅ تم الإدخال والحفظ')
-            _R.log(f'✅ {row["id"]} تم', 'ok')
+            report.append((row['name'], match['name'], score, 'تم'))
+            print('   ✅ تم الإدخال والحفظ'); _R.log(f"✅ {row['name'][:24]} تم", 'ok')
         else:
             fail += 1
-            results.append(row['id'])
-            print('   ❌ لم يُحفظ')
-            _R.log(f'❌ {row["id"]} فشل', 'error')
+            report.append((row['name'], match['name'], score, 'فشل حفظ'))
+            print('   ❌ لم يُحفظ'); _R.log(f"❌ {row['name'][:24]} فشل حفظ", 'error')
         _R.progress(done=len(done), failed=fail, skipped=skip)
 
+    # تقرير Excel
+    try:
+        rep = openpyxl.Workbook(); rs = rep.active; rs.title = 'تقرير الإحداثيات'
+        rs.sheet_view.rightToLeft = True
+        rs.append(['اسم الموقع (الإكسل)', 'اسم المنصة', 'نسبة التطابق', 'الحالة'])
+        for a, b, sc, st in report:
+            rs.append([a, b, f"{sc:.0%}", st])
+        rpath = os.path.join(out_dir, f'تقرير_الإحداثيات_{decision}.xlsx')
+        rep.save(rpath)
+        print(f'📊 تقرير: {rpath}')
+    except Exception as e:
+        print(f'⚠️ تعذّر حفظ التقرير: {e}')
+
     _R.done(ok=ok, failed=fail, skipped=skip)
-    print(f"\n{'='*55}\n  🎉 انتهى\n  ✅ أُدخل: {ok}\n  ⏭️ متخطّى: {skip}\n  ❌ فشل: {fail}")
-    if results:
-        print('  المواقع الفاشلة: ' + ', '.join(results[:30]) + (' …' if len(results) > 30 else ''))
-    print('='*55)
+    print(f"\n{'='*55}\n  🎉 انتهى\n  ✅ أُدخل: {ok}\n  ⏭️ متخطّى: {skip}\n  ❌ فشل/لا تطابق: {fail}\n{'='*55}")
     try:
         driver.quit()
     except Exception:

@@ -24,7 +24,7 @@ import pkgutil
 # يرى pkgutil الملفات على القرص). أي plugin جديد يُضاف هنا تلقائياً عبر المسح،
 # ويُسجّل اسمه هنا أيضاً ليعمل بعد التجميد.
 _KNOWN = [
-    "p_historical", "p_croqui", "p_complementary", "p_region_update",
+    "p_historical", "p_croqui", "p_coords", "p_complementary", "p_region_update",
     "p_export_files", "p_pdf_table", "p_failed_tracker",
 ]
 

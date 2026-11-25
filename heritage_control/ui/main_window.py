@@ -543,7 +543,7 @@ class RunView(tk.Frame):
             var = tk.Text(row, height=4, width=28, relief="flat", bd=0,
                           highlightthickness=1, highlightbackground=t["border"])
             w = var
-        elif typ in ("folder", "savefile"):
+        elif typ in ("folder", "savefile", "openfile"):
             var = tk.StringVar()
             inner = tk.Frame(row, bg=t["card"])
             tk.Entry(inner, textvariable=var, width=22, justify="right", relief="flat", bd=0,
@@ -564,6 +564,9 @@ class RunView(tk.Frame):
     def _pick(self, spec, var):
         if spec["type"] == "folder":
             v = filedialog.askdirectory(parent=self)
+        elif spec["type"] == "openfile":
+            v = filedialog.askopenfilename(parent=self,
+                                           filetypes=[("Excel", "*.xlsx *.xls"), ("الكل", "*.*")])
         else:
             v = filedialog.asksaveasfilename(parent=self, defaultextension=".xlsx",
                                              filetypes=[("Excel", "*.xlsx")])

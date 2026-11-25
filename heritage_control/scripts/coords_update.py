@@ -81,27 +81,42 @@ def read_rows(path):
     ws = openpyxl.load_workbook(path, data_only=True).active
     headers = [ws.cell(1, c).value for c in range(1, ws.max_column + 1)]
     ci_name = _find_col(headers, 'اسم الموقع', 'اسم المبنى', 'الاسم', 'name')
-    ci_x = _find_col(headers, 'خط الطول', 'الطول', 'longitude', ' x', 'x ')
-    ci_y = _find_col(headers, 'خط العرض', 'العرض', 'latitude', ' y', 'y ')
+    ci_x = _find_col(headers, 'الإحداثي x', 'الاحداثي x', 'خط الطول', 'الطول', 'longitude', ' x', 'x ')
+    ci_y = _find_col(headers, 'الإحداثي y', 'الاحداثي y', 'خط العرض', 'العرض', 'latitude', ' y', 'y ')
     ci_area = _find_col(headers, 'مساحة', 'المساحة', 'area')
-    ci_id = _find_col(headers, 'site id', 'siteid', 'معرف')
-    if ci_name is None or ci_x is None or ci_y is None:
+    # عمود رقم المبنى الحقيقي على المنصة (كود الموقع) — لو وُجد نستخدمه مباشرة
+    ci_code = _find_col(headers, 'كود الموقع', 'كود', 'رقم المبنى', 'رقم الموقع',
+                        'building id', 'site id', 'siteid', 'معرف')
+    if ci_x is None or ci_y is None or (ci_name is None and ci_code is None):
         raise SystemExit(
-            "لازم يحتوي الملف على: «اسم الموقع» + «خط الطول X» + «خط العرض Y».\n"
+            "لازم يحتوي الملف على عمودي الإحداثيات (X و Y) + (كود الموقع أو اسم الموقع).\n"
             f"الأعمدة الموجودة: {headers}"
         )
     rows = []
     for r in range(2, ws.max_row + 1):
-        name = ws.cell(r, ci_name + 1).value
+        name = ws.cell(r, ci_name + 1).value if ci_name is not None else ''
         x = num_str(ws.cell(r, ci_x + 1).value)
         y = num_str(ws.cell(r, ci_y + 1).value)
         area = num_str(ws.cell(r, ci_area + 1).value) if ci_area is not None else ''
-        tag = ws.cell(r, ci_id + 1).value if ci_id is not None else ''
-        if not name or not str(name).strip() or not (x and y):
+        code = ws.cell(r, ci_code + 1).value if ci_code is not None else ''
+        code = str(code or '').strip()
+        if code.endswith('.0'):
+            code = code[:-2]
+        if not (x and y):
             continue
-        rows.append({'name': str(name).strip(), 'x': x, 'y': y, 'area': area,
-                     'tag': str(tag or '').strip()})
+        if (not name or not str(name).strip()) and not code:
+            continue
+        rows.append({'name': str(name or '').strip(), 'x': x, 'y': y, 'area': area, 'code': code})
     return rows
+
+
+def codes_are_real(rows):
+    """الكود صالح كرقم منصة لو أغلب القيم أرقام من 4 خانات فأكثر (مثل 41234)."""
+    vals = [r['code'] for r in rows if r.get('code')]
+    if len(vals) < max(1, int(len(rows) * 0.6)):
+        return False
+    good = sum(1 for v in vals if v.isdigit() and int(v) >= 1000)
+    return good >= int(len(vals) * 0.8)
 
 
 # ───────────────────────── مطابقة الأسماء ─────────────────────────
@@ -309,7 +324,7 @@ def write_coords(bid, x, y, area):
 
 
 def main():
-    ap = argparse.ArgumentParser(description='إدخال إحداثيات من Excel بالمطابقة بالاسم')
+    ap = argparse.ArgumentParser(description='إدخال إحداثيات من Excel (كود مباشر أو مطابقة بالاسم)')
     ap.add_argument('--excel', default=os.environ.get('HERITAGE_COORDS_EXCEL', ''))
     ap.add_argument('--decision', default=os.environ.get('HERITAGE_DECISION', ''))
     ap.add_argument('--output', default=os.environ.get('HERITAGE_OUTPUT', '') or 'CoordsRun')
@@ -326,15 +341,17 @@ def main():
                 excel = os.path.join(folder, cands[0])
     if not excel or not os.path.isfile(excel):
         raise SystemExit('❌ حدّد ملف الإحداثيات (Excel).')
-    decision = (args.decision or '').strip()
-    if not decision:
-        raise SystemExit('❌ أدخل رقم قرار التسجيل — لازم لتحديد نطاق المطابقة على المنصة.')
 
     rows = read_rows(excel)
     if args.limit and args.limit > 0:
         rows = rows[:args.limit]
+    decision = (args.decision or '').strip()
+
+    # اختيار الوضع تلقائياً: كود المنصة المباشر (الأدق) أو المطابقة بالاسم.
+    CODE_MODE = codes_are_real(rows)
     print(f'📄 ملف الإحداثيات: {excel}')
-    print(f'📋 رقم القرار: {decision} | عدد المواقع: {len(rows)}')
+    print(f'📊 عدد المواقع: {len(rows)} | الوضع: '
+          + ('كود المنصة المباشر ✅' if CODE_MODE else 'مطابقة بالاسم'))
     print('✍️ تنبيه: تكتب فعلياً على المنصة (إحداثيات + مساحة).')
 
     out_dir = os.path.abspath(args.output)
@@ -348,41 +365,58 @@ def main():
     _R.total(len(rows))
     _R.progress(done=len(done))
 
+    platform = []
+    if not CODE_MODE:
+        if not decision:
+            raise SystemExit('❌ وضع المطابقة بالاسم يحتاج رقم القرار. '
+                             'أو أضف عمود «كود الموقع» (رقم المبنى على المنصة) لإدخال مباشر بلا رقم قرار.')
+
     launch_chrome()
     wait_for_login()
 
-    print('🔎 جمع مباني القرار من المنصة للمطابقة…')
-    _R.log('جاري جمع مباني القرار للمطابقة…', 'info')
-    platform = collect_platform_buildings(decision)
-    print(f'🏢 مباني المنصة: {len(platform)}')
-    _R.log(f'مباني المنصة: {len(platform)}', 'info')
-    if not platform:
-        raise SystemExit('❌ لم تُجمع مباني من المنصة لهذا القرار — تأكد من الرقم وتسجيل الدخول.')
+    if not CODE_MODE:
+        print('🔎 جمع مباني القرار من المنصة للمطابقة…')
+        _R.log('جاري جمع مباني القرار للمطابقة…', 'info')
+        platform = collect_platform_buildings(decision)
+        print(f'🏢 مباني المنصة: {len(platform)}')
+        if not platform:
+            raise SystemExit('❌ لم تُجمع مباني من المنصة لهذا القرار — تأكد من الرقم وتسجيل الدخول.')
 
     ok = fail = skip = 0
     used = set()
-    report = []   # (اسم الإكسل، اسم المنصة، النسبة، الحالة)
+    report = []   # (اسم الإكسل، رقم/اسم المنصة، ملاحظة، الحالة)
     for i, row in enumerate(rows, 1):
         if not _R.wait_if_paused() or _R.should_stop():
             print('⏹ إيقاف آمن — التقدّم محفوظ.'); break
-        key = row['tag'] or row['name']
-        _R.progress(current=row['name'][:30])
+
+        # تحديد رقم المبنى على المنصة
+        if CODE_MODE:
+            bid = row['code']
+            note = ''
+            disp = f"{bid} ({row['name'][:24]})" if row['name'] else bid
+        else:
+            match, score = best_match(row['name'], platform, used)
+            if not match:
+                fail += 1
+                report.append((row['name'], '—', f'{score:.0%}', 'لا تطابق'))
+                print(f"[{i}/{len(rows)}] ❌ «{row['name'][:30]}» تشابه {score:.0%} — أقل من الحد")
+                _R.log(f"لا تطابق: {row['name'][:28]} ({score:.0%})", 'warn')
+                _R.progress(failed=fail, current=row['name'][:28]); continue
+            used.add(match['id'])
+            bid = match['id']
+            note = f'{score:.0%}'
+            disp = f"«{row['name'][:22]}»→«{match['name'][:22]}» ({score:.0%}) [{bid}]"
+
+        key = str(bid)
+        _R.progress(current=disp[:40])
         if key in done:
             skip += 1
             _R.progress(skipped=skip); continue
 
-        match, score = best_match(row['name'], platform, used)
-        if not match:
-            fail += 1
-            report.append((row['name'], '—', score, 'لا تطابق'))
-            print(f"[{i}/{len(rows)}] ❌ «{row['name'][:30]}» أفضل تشابه {score:.0%} — أقل من الحد")
-            _R.log(f"لا تطابق: {row['name'][:30]} ({score:.0%})", 'warn')
-            _R.progress(failed=fail); continue
-        used.add(match['id'])
-        print(f"\n[{i}/{len(rows)}] «{row['name'][:28]}» → «{match['name'][:28]}» ({score:.0%}) "
-              f"[{match['id']}]  X={row['x']} Y={row['y']}" + (f" م={row['area']}" if row['area'] else ''))
+        print(f"\n[{i}/{len(rows)}] {disp}  X={row['x']} Y={row['y']}"
+              + (f" م={row['area']}" if row['area'] else ''))
         try:
-            good = write_coords(match['id'], row['x'], row['y'], row['area'])
+            good = write_coords(bid, row['x'], row['y'], row['area'])
         except Exception as e:
             good = False; print(f'   ❌ {str(e)[:60]}')
         if good:
@@ -391,22 +425,22 @@ def main():
                 json.dump({'done': sorted(done)}, open(ckpt, 'w', encoding='utf-8'), ensure_ascii=False)
             except Exception:
                 pass
-            report.append((row['name'], match['name'], score, 'تم'))
-            print('   ✅ تم الإدخال والحفظ'); _R.log(f"✅ {row['name'][:24]} تم", 'ok')
+            report.append((row['name'] or bid, bid, note, 'تم'))
+            print('   ✅ تم الإدخال والحفظ'); _R.log(f"✅ {disp[:26]} تم", 'ok')
         else:
             fail += 1
-            report.append((row['name'], match['name'], score, 'فشل حفظ'))
-            print('   ❌ لم يُحفظ'); _R.log(f"❌ {row['name'][:24]} فشل حفظ", 'error')
+            report.append((row['name'] or bid, bid, note, 'فشل حفظ'))
+            print('   ❌ لم يُحفظ'); _R.log(f"❌ {disp[:26]} فشل حفظ", 'error')
         _R.progress(done=len(done), failed=fail, skipped=skip)
 
     # تقرير Excel
     try:
         rep = openpyxl.Workbook(); rs = rep.active; rs.title = 'تقرير الإحداثيات'
         rs.sheet_view.rightToLeft = True
-        rs.append(['اسم الموقع (الإكسل)', 'اسم المنصة', 'نسبة التطابق', 'الحالة'])
-        for a, b, sc, st in report:
-            rs.append([a, b, f"{sc:.0%}", st])
-        rpath = os.path.join(out_dir, f'تقرير_الإحداثيات_{decision}.xlsx')
+        rs.append(['اسم الموقع', 'رقم المنصة', 'ملاحظة/تطابق', 'الحالة'])
+        for a, b, nt, st in report:
+            rs.append([a, b, nt, st])
+        rpath = os.path.join(out_dir, f'تقرير_الإحداثيات_{decision or "codes"}.xlsx')
         rep.save(rpath)
         print(f'📊 تقرير: {rpath}')
     except Exception as e:

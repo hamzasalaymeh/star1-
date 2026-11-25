@@ -833,8 +833,10 @@ async def save_pdf(page, url: str, path: str) -> bool:
     if os.path.exists(temp_path):
         os.remove(temp_path)
 
-    # نفس عدد المحاولات (لا نُطيل)، لكن بانتظار أذكى للـ500 ليلتقط النقص المؤقت
+    # نفس عدد المحاولات (لا نُطيل)، لكن بانتظار أذكى للـ500 ليلتقط النقص المؤقت.
+    # وإن تكرّر الـ500 (خطأ خادم حتمي لهذا المبنى) نتخطّى بسرعة بدل إضاعة دقائق.
     pdf_retries = MAX_RETRIES
+    server_err_hits = 0
     for attempt in range(pdf_retries):
         try:
             response = await page.goto(url, wait_until='domcontentloaded', timeout=60000)
@@ -894,8 +896,12 @@ async def save_pdf(page, url: str, path: str) -> bool:
                 print(f"\n⚠️ Timeout ({attempt+1}/{pdf_retries})")
                 await asyncio.sleep(RETRY_WAIT)
             elif 'SERVER_ERROR' in err:
-                # خطأ خادم (500) غالباً مؤقت تحت الضغط — ننتظر بتصاعد ونعطي السيرفر وقتاً
-                wait = min(10 + attempt * 10, 45)   # 10, 20, 30, 40, 45…
+                server_err_hits += 1
+                # بعد 3 أخطاء 500 متتالية نعتبرها حتمية لهذا المبنى ونتخطّى بسرعة
+                if server_err_hits >= 3:
+                    print(f"\n⚠️ خطأ خادم المنصة 500 متكرر ({server_err_hits}×) — تخطّي سريع لهذا الملف")
+                    break
+                wait = min(6 + attempt * 6, 20)   # 6, 12, 18, 20…
                 print(f"\n⚠️ خطأ خادم المنصة 500 ({attempt+1}/{pdf_retries}) — انتظار {wait}ث ثم إعادة المحاولة")
                 await asyncio.sleep(wait)
             else:

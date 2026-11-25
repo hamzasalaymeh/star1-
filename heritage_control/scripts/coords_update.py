@@ -177,24 +177,52 @@ def launch_chrome():
     print('✅ تم فتح Chrome والاتصال به')
 
 
-def wait_for_login(max_wait=600):
-    driver.get(INBOX); time.sleep(3)
+def reconnect():
+    """يعيد الربط بنفس نافذة Chrome (debug port) لو انقطعت الجلسة — بلا فتح نافذة جديدة."""
+    global driver, wait
+    try:
+        opts = Options()
+        opts.add_experimental_option('debuggerAddress', '127.0.0.1:9222')
+        driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=opts)
+        wait = WebDriverWait(driver, 15)
+        _ = driver.current_url
+        return True
+    except Exception:
+        return False
+
+
+def wait_for_login(max_wait=1800):
+    """ينتظر الدخول اليدوي بدون أي إعادة تحميل (فلا نقاطع المستخدم أثناء الكتابة)."""
+    try:
+        driver.get(INBOX); time.sleep(3)
+    except Exception:
+        reconnect()
     deadline = time.time() + max_wait
     warned = False
-    while ('Login' in (driver.current_url or '') or driver.title == 'Runtime Error'):
-        if not warned:
-            print('👤 سجّل دخولك الآن في نافذة Chrome — سأكمل تلقائياً بعد الدخول…')
-            _R.log('بانتظار تسجيل الدخول في نافذة Chrome…', 'warn')
-            warned = True
+    while True:
         try:
-            driver.get(BASE); time.sleep(5)
-            driver.get(INBOX); time.sleep(2)
+            url = driver.current_url or ''
+            title = driver.title or ''
         except Exception:
-            time.sleep(3)
+            # النافذة أُغلقت أو انقطعت — نحاول إعادة الربط دون إزعاج المستخدم
+            print('⚠️ انقطع الاتصال بنافذة Chrome — لا تغلق النافذة. أحاول إعادة الربط…')
+            if not reconnect():
+                time.sleep(4)
+                if time.time() > deadline:
+                    raise SystemExit('تعذّر الاتصال بنافذة Chrome (قد تكون أُغلقت).')
+            continue
+        # نُعتبر مسجّلين عند مغادرة صفحة الدخول/الخطأ
+        if 'login' not in url.lower() and title != 'Runtime Error' and 'account' not in url.lower():
+            print('✅ تم تسجيل الدخول')
+            _R.log('تم تسجيل الدخول', 'ok')
+            return
+        if not warned:
+            print('👤 سجّل دخولك في نافذة Chrome على مهلك — لن أُعيد تحميل الصفحة، وسأكمل تلقائياً بعد الدخول.')
+            _R.log('بانتظار تسجيل الدخول (بدون إعادة تحميل)…', 'warn')
+            warned = True
         if time.time() > deadline:
             raise SystemExit('انتهت مهلة انتظار تسجيل الدخول.')
-    print('✅ تم تسجيل الدخول')
-    _R.log('تم تسجيل الدخول', 'ok')
+        time.sleep(2)
 
 
 def js_set(name, value):

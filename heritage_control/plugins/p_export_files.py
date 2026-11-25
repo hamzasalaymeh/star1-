@@ -10,5 +10,9 @@ PLUGIN = {
     "settings": [
         {"name": "decision", "label": "رقم قرار التسجيل", "type": "text", "arg": "--decision", "required": True},
         {"name": "output", "label": "مجلد الحفظ", "type": "folder", "arg": "--output", "required": True},
+        {"name": "EXPORT_NOMINATION",   "label": "☑ تصدير: قرار الترشيح",   "type": "bool", "env": True, "default": True},
+        {"name": "EXPORT_REGISTRATION", "label": "☑ تصدير: استمارة التسجيل", "type": "bool", "env": True, "default": True},
+        {"name": "EXPORT_SUMMARY",      "label": "☑ تصدير: ملخص الاستمارة",  "type": "bool", "env": True, "default": True},
+        {"name": "EXPORT_PHOTOS",       "label": "☑ تصدير: الصور",           "type": "bool", "env": True, "default": True},
     ],
 }

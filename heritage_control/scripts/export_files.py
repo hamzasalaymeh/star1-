@@ -64,6 +64,12 @@ OUTPUT_DIR = ""
 PROGRESS_FILE = ""
 DECISION = ""
 
+# أعلام نطاق التصدير (أيّ الملفات تُصدَّر). تُضبط من البيئة؛ الافتراضي الكل.
+EXPORT_NOMINATION   = True   # قرار الترشيح
+EXPORT_REGISTRATION = True   # استمارة التسجيل
+EXPORT_SUMMARY      = True   # ملخص الاستمارة
+EXPORT_PHOTOS       = True   # الصور
+
 
 # ===== CELL 2 =====
 # ============================================================
@@ -802,17 +808,21 @@ def playwright_cookies() -> list:
 def local_artifacts_complete(building: dict, dirs: dict) -> bool:
     """لا نثق بعلامة completed وحدها؛ نتحقق من الملفات الأساسية على القرص."""
     stem = artifact_stem(building)
-    expected_pdfs = (
-        ('nomination_url', 'nominations'),
-        ('registration_url', 'registration'),
-        ('summary_url', 'summary'),
-    )
-    for url_key, dir_key in expected_pdfs:
+    expected_pdfs = [
+        ('nomination_url', 'nominations', EXPORT_NOMINATION),
+        ('registration_url', 'registration', EXPORT_REGISTRATION),
+        ('summary_url', 'summary', EXPORT_SUMMARY),
+    ]
+    for url_key, dir_key, enabled in expected_pdfs:
+        if not enabled:
+            continue                       # النوع غير مطلوب في هذا التشغيل
         if not building.get(url_key):
             return False
         if not valid_pdf(os.path.join(dirs[dir_key], f"{stem}.pdf")):
             return False
-    return os.path.isdir(os.path.join(dirs['photos'], stem))
+    if EXPORT_PHOTOS:
+        return os.path.isdir(os.path.join(dirs['photos'], stem))
+    return True
 
 async def save_pdf(page, url: str, path: str) -> bool:
     """تحميل صفحة كـ PDF مع التحقق من صحة المحتوى"""
@@ -986,29 +996,32 @@ async def run_automation(buildings: list, dirs: dict, progress: dict):
             errors = []
             warnings = []
 
-            # ── 1. قرار الترشيح ──
-            if building.get('nomination_url'):
-                path = os.path.join(dirs['nominations'], f"{bname}.pdf")
-                ok = await save_pdf(page, building['nomination_url'], path)
-                if not ok: errors.append('nomination')
-            else:
-                errors.append('nomination_url_missing')
+            # ── 1. قرار الترشيح ── (يُصدَّر فقط إن كان مُفعّلاً في الخيارات)
+            if EXPORT_NOMINATION:
+                if building.get('nomination_url'):
+                    path = os.path.join(dirs['nominations'], f"{bname}.pdf")
+                    ok = await save_pdf(page, building['nomination_url'], path)
+                    if not ok: errors.append('nomination')
+                else:
+                    errors.append('nomination_url_missing')
 
             # ── 2. استمارة التسجيل ──
-            if building.get('registration_url'):
-                path = os.path.join(dirs['registration'], f"{bname}.pdf")
-                ok = await save_pdf(page, building['registration_url'], path)
-                if not ok: errors.append('registration')
-            else:
-                errors.append('registration_url_missing')
+            if EXPORT_REGISTRATION:
+                if building.get('registration_url'):
+                    path = os.path.join(dirs['registration'], f"{bname}.pdf")
+                    ok = await save_pdf(page, building['registration_url'], path)
+                    if not ok: errors.append('registration')
+                else:
+                    errors.append('registration_url_missing')
 
             # ── 3. ملخص الاستمارة ──
-            if building.get('summary_url'):
-                path = os.path.join(dirs['summary'], f"{bname}.pdf")
-                ok = await save_pdf(page, building['summary_url'], path)
-                if not ok: errors.append('summary')
-            else:
-                errors.append('summary_url_missing')
+            if EXPORT_SUMMARY:
+                if building.get('summary_url'):
+                    path = os.path.join(dirs['summary'], f"{bname}.pdf")
+                    ok = await save_pdf(page, building['summary_url'], path)
+                    if not ok: errors.append('summary')
+                else:
+                    errors.append('summary_url_missing')
 
             # ── 4. الصور ──
             def _classify_photos(pr):
@@ -1024,14 +1037,15 @@ async def run_automation(buildings: list, dirs: dict, progress: dict):
                 elif failed and failed > 0:
                     warnings.append(f"photos_partial_{failed}/{found}")  # تنبيه فقط
 
-            try:
+            if EXPORT_PHOTOS:
+              try:
                 photo_result = download_photos(building, dirs['photos'], photo_session)
                 if photo_result.get('failed', 0) == -1:
                     refresh_session()
                     photo_session = make_session()
                     photo_result  = download_photos(building, dirs['photos'], photo_session)
                 _classify_photos(photo_result)
-            except RuntimeError as exc:
+              except RuntimeError as exc:
                 if 'SESSION_EXPIRED' in str(exc):
                     refresh_session()
                     photo_session = make_session()
@@ -1042,7 +1056,7 @@ async def run_automation(buildings: list, dirs: dict, progress: dict):
                         errors.append(f'photos_error: {str(retry_exc)[:40]}')
                 else:
                     errors.append(f'photos_error: {str(exc)[:40]}')
-            except Exception as e:
+              except Exception as e:
                 errors.append(f'photos_error: {str(e)[:40]}')
 
             # ── حفظ التقدم ──
@@ -1163,6 +1177,24 @@ def ask_decision_popup() -> str:
 
 def main():
     global USERNAME, PASSWORD, OUTPUT_DIR, PROGRESS_FILE, DECISION, AUTH_COOKIES, SESSION_COOKIE
+    global EXPORT_NOMINATION, EXPORT_REGISTRATION, EXPORT_SUMMARY, EXPORT_PHOTOS
+
+    # نطاق التصدير من البيئة (يمرّره مركز التحكم). "False" = تخطّي هذا النوع.
+    def _flag(name, default=True):
+        v = os.environ.get(name)
+        if v is None:
+            return default
+        return str(v).strip().lower() not in ("false", "0", "no", "لا", "")
+    EXPORT_NOMINATION   = _flag("EXPORT_NOMINATION")
+    EXPORT_REGISTRATION = _flag("EXPORT_REGISTRATION")
+    EXPORT_SUMMARY      = _flag("EXPORT_SUMMARY")
+    EXPORT_PHOTOS       = _flag("EXPORT_PHOTOS")
+    if not any((EXPORT_NOMINATION, EXPORT_REGISTRATION, EXPORT_SUMMARY, EXPORT_PHOTOS)):
+        EXPORT_NOMINATION = EXPORT_REGISTRATION = EXPORT_SUMMARY = EXPORT_PHOTOS = True  # لا تترك الكل مُطفأ
+    _scope = [n for n, f in (("قرار الترشيح", EXPORT_NOMINATION), ("استمارة التسجيل", EXPORT_REGISTRATION),
+                             ("ملخص الاستمارة", EXPORT_SUMMARY), ("الصور", EXPORT_PHOTOS)) if f]
+    print("🧭 نطاق التصدير: " + " + ".join(_scope))
+
     parser = argparse.ArgumentParser(description="تصدير ملفات مواقع مشروع التراث العمراني")
     parser.add_argument("--decision", help="رقم قرار التسجيل")
     parser.add_argument("--output", default="HeritageExports", help="مجلد الحفظ")
